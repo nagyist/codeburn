@@ -57,6 +57,14 @@ git push origin main
 gh pr comment <number> --body "Merged, thanks!"
 ```
 
+### What gets committed
+- Source code: `src/`, `tests/`
+- Config: `package.json`, `tsconfig.json`, `tsup.config.ts`, `.gitignore`
+- Docs: `README.md`, `CHANGELOG.md`, `LICENSE`, `CLAUDE.md`
+- Assets: `assets/`
+- NEVER commit: `.env`, secrets, keys, planning docs (`docs/superpowers/`), IDE config, logs, `.DS_Store`
+- Check `git status` before every commit. Stage specific files, never `git add -A` or `git add .`
+
 ### Commit rules
 - Commits from: AgentSeal <hello@agentseal.org>
 - NEVER add Co-Authored-By lines
