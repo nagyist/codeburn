@@ -32,6 +32,8 @@ const FRANKFURTER_URL = 'https://api.frankfurter.app/latest?from=USD&to='
 // Overwritten by loadCurrency() if the user has configured a currency.
 let active: CurrencyState = { code: 'USD', rate: 1, symbol: '$' }
 
+const USD: CurrencyState = { code: 'USD', rate: 1, symbol: '$' }
+
 // ---------------------------------------------------------------------------
 // Intl-based currency helpers
 // ---------------------------------------------------------------------------
@@ -162,6 +164,21 @@ export async function loadCurrency(): Promise<void> {
 /** Returns the active currency state (code, rate, and symbol). */
 export function getCurrency(): CurrencyState {
   return active
+}
+
+/**
+ * Switches the active currency at runtime. Used by the dashboard currency picker.
+ * Fetches the exchange rate (from cache or API) and updates the display currency.
+ * Does not write to the config file -- session-only unless the caller saves separately.
+ */
+export async function switchCurrency(code: string): Promise<void> {
+  if (code === 'USD') {
+    active = USD
+    return
+  }
+  const rate = await getExchangeRate(code)
+  const symbol = resolveSymbol(code)
+  active = { code, rate, symbol }
 }
 
 /** Returns a dynamic column header like "Cost (AUD)" for use in CSV/JSON exports. */

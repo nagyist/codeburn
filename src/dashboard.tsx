@@ -4,6 +4,7 @@ import { CATEGORY_LABELS, type ProjectSummary, type TaskCategory } from './types
 import { formatCost, formatTokens } from './format.js'
 import { parseAllSessions } from './parser.js'
 import { loadPricing } from './models.js'
+import { switchCurrency, getCurrency, isValidCurrencyCode } from './currency.js'
 import { providers } from './providers/index.js'
 
 type Period = 'today' | 'week' | 'month' | '30days'
@@ -411,7 +412,9 @@ function StatusBar({ width, showProvider }: { width: number; showProvider?: bool
         <Text color={ORANGE} bold>3</Text>
         <Text dimColor> 30 days   </Text>
         <Text color={ORANGE} bold>4</Text>
-        <Text dimColor> month</Text>
+        <Text dimColor> month   </Text>
+        <Text color={ORANGE} bold>c</Text>
+        <Text dimColor> currency ({getCurrency().code})</Text>
         {showProvider && (
           <>
             <Text dimColor>   </Text>
@@ -420,6 +423,115 @@ function StatusBar({ width, showProvider }: { width: number; showProvider?: bool
           </>
         )}
       </Text>
+    </Box>
+  )
+}
+
+// Common currencies shown in the picker. Full list is searchable by typing a code.
+const COMMON_CURRENCIES = [
+  { code: 'USD', name: 'US Dollar' },
+  { code: 'GBP', name: 'British Pound' },
+  { code: 'EUR', name: 'Euro' },
+  { code: 'AUD', name: 'Australian Dollar' },
+  { code: 'CAD', name: 'Canadian Dollar' },
+  { code: 'NZD', name: 'New Zealand Dollar' },
+  { code: 'JPY', name: 'Japanese Yen' },
+  { code: 'CHF', name: 'Swiss Franc' },
+  { code: 'INR', name: 'Indian Rupee' },
+  { code: 'BRL', name: 'Brazilian Real' },
+  { code: 'SEK', name: 'Swedish Krona' },
+  { code: 'SGD', name: 'Singapore Dollar' },
+  { code: 'HKD', name: 'Hong Kong Dollar' },
+  { code: 'KRW', name: 'South Korean Won' },
+  { code: 'MXN', name: 'Mexican Peso' },
+  { code: 'ZAR', name: 'South African Rand' },
+  { code: 'DKK', name: 'Danish Krone' },
+  { code: 'NOK', name: 'Norwegian Krone' },
+  { code: 'PLN', name: 'Polish Zloty' },
+  { code: 'THB', name: 'Thai Baht' },
+  { code: 'TWD', name: 'Taiwan Dollar' },
+  { code: 'TRY', name: 'Turkish Lira' },
+  { code: 'PHP', name: 'Philippine Peso' },
+  { code: 'CZK', name: 'Czech Koruna' },
+]
+
+function CurrencyPicker({ width, onSelect, onCancel }: {
+  width: number
+  onSelect: (code: string) => void
+  onCancel: () => void
+}) {
+  const [search, setSearch] = useState('')
+  const [cursor, setCursor] = useState(0)
+  const activeCode = getCurrency().code
+
+  const filtered = search.length > 0
+    ? COMMON_CURRENCIES.filter(c =>
+        c.code.toLowerCase().includes(search.toLowerCase()) ||
+        c.name.toLowerCase().includes(search.toLowerCase()))
+    : COMMON_CURRENCIES
+
+  // Keep cursor in bounds when search narrows the list
+  const safeCursor = Math.min(cursor, Math.max(filtered.length - 1, 0))
+  const maxVisible = 12
+
+  useInput((input, key) => {
+    if (key.escape) { onCancel(); return }
+    if (key.return) {
+      if (filtered.length > 0) {
+        onSelect(filtered[safeCursor].code)
+      } else if (search.length === 3 && isValidCurrencyCode(search.toUpperCase())) {
+        onSelect(search.toUpperCase())
+      }
+      return
+    }
+    if (key.upArrow) { setCursor(Math.max(0, safeCursor - 1)); return }
+    if (key.downArrow) { setCursor(Math.min(filtered.length - 1, safeCursor + 1)); return }
+    if (key.backspace || key.delete) {
+      setSearch(s => s.slice(0, -1))
+      setCursor(0)
+      return
+    }
+    if (input && input.length === 1 && /[a-zA-Z]/.test(input)) {
+      setSearch(s => s + input)
+      setCursor(0)
+    }
+  })
+
+  // Scroll window around the cursor
+  const scrollStart = Math.max(0, Math.min(safeCursor - Math.floor(maxVisible / 2), filtered.length - maxVisible))
+  const visible = filtered.slice(scrollStart, scrollStart + maxVisible)
+
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor={ORANGE} width={Math.min(width, 44)} paddingX={1}>
+      <Text bold color={ORANGE}>Currency</Text>
+      <Text dimColor>Type to search, arrows to move, enter to select, esc to cancel</Text>
+      <Box marginTop={1}>
+        <Text color={ORANGE}>{'> '}</Text>
+        <Text>{search.length > 0 ? search.toUpperCase() : ''}</Text>
+        <Text dimColor>{search.length === 0 ? 'search...' : ''}</Text>
+      </Box>
+      <Box flexDirection="column" marginTop={1}>
+        {visible.map((c, i) => {
+          const idx = scrollStart + i
+          const isActive = c.code === activeCode
+          const isSelected = idx === safeCursor
+          return (
+            <Text key={c.code}>
+              <Text color={isSelected ? ORANGE : undefined} bold={isSelected}>
+                {isSelected ? '> ' : '  '}
+                {c.code} {c.name}
+                {isActive ? ' *' : ''}
+              </Text>
+            </Text>
+          )
+        })}
+        {filtered.length === 0 && search.length >= 3 && isValidCurrencyCode(search.toUpperCase()) && (
+          <Text color={GOLD}>  Press enter to use {search.toUpperCase()}</Text>
+        )}
+        {filtered.length === 0 && (search.length < 3 || !isValidCurrencyCode(search.toUpperCase())) && (
+          <Text dimColor>  No matches</Text>
+        )}
+      </Box>
     </Box>
   )
 }
@@ -475,6 +587,8 @@ function InteractiveDashboard({ initialProjects, initialPeriod, initialProvider 
   const [period, setPeriod] = useState<Period>(initialPeriod)
   const [projects, setProjects] = useState<ProjectSummary[]>(initialProjects)
   const [loading, setLoading] = useState(false)
+  const [showCurrencyPicker, setShowCurrencyPicker] = useState(false)
+  const [, forceRender] = useState(0)
   const [activeProvider, setActiveProvider] = useState(initialProvider)
   const [detectedProviders, setDetectedProviders] = useState<string[]>([])
   const { dashWidth } = getLayout()
@@ -515,8 +629,16 @@ function InteractiveDashboard({ initialProjects, initialPeriod, initialProvider 
   }, [period, activeProvider, reloadData])
 
   useInput((input, key) => {
+    // Don't capture keys while the currency picker is open -- it has its own input handler
+    if (showCurrencyPicker) return
+
     if (input === 'q') {
       exit()
+      return
+    }
+
+    if (input === 'c') {
+      setShowCurrencyPicker(true)
       return
     }
 
@@ -539,6 +661,25 @@ function InteractiveDashboard({ initialProjects, initialPeriod, initialProvider 
     else if (input === '3') switchPeriod('30days')
     else if (input === '4') switchPeriod('month')
   })
+
+  const handleCurrencySelect = async (code: string) => {
+    setShowCurrencyPicker(false)
+    await switchCurrency(code)
+    forceRender(n => n + 1)
+  }
+
+  const handleCurrencyCancel = () => {
+    setShowCurrencyPicker(false)
+  }
+
+  if (showCurrencyPicker) {
+    return (
+      <Box flexDirection="column" width={dashWidth}>
+        <PeriodTabs active={period} providerName={activeProvider} showProvider={multipleProviders} />
+        <CurrencyPicker width={dashWidth} onSelect={handleCurrencySelect} onCancel={handleCurrencyCancel} />
+      </Box>
+    )
+  }
 
   if (loading) {
     return (

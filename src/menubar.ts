@@ -174,6 +174,7 @@ export function renderMenubarFormat(
     { code: 'KRW', name: 'South Korean Won' },
     { code: 'MXN', name: 'Mexican Peso' },
     { code: 'ZAR', name: 'South African Rand' },
+    { code: 'DKK', name: 'Danish Krone' },
   ]
   lines.push(`Currency: ${activeCurrency} | size=14`)
   for (const { code, name } of currencies) {
