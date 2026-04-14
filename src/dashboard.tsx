@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react'
-import { render, Box, Text, useInput, useApp } from 'ink'
+import { render, Box, Text, useInput, useApp, useWindowSize } from 'ink'
 import { CATEGORY_LABELS, type ProjectSummary, type TaskCategory } from './types.js'
 import { formatCost, formatTokens } from './format.js'
 import { parseAllSessions } from './parser.js'
@@ -83,9 +83,9 @@ function getDateRange(period: Period): { start: Date; end: Date } {
 
 type Layout = { dashWidth: number; wide: boolean; halfWidth: number; barWidth: number }
 
-function getLayout(): Layout {
-  const termWidth = process.stdout.columns || parseInt(process.env['COLUMNS'] ?? '') || 80
-  const dashWidth = Math.min(104, termWidth)
+function getLayout(columns?: number): Layout {
+  const termWidth = columns || parseInt(process.env['COLUMNS'] ?? '') || 80
+  const dashWidth = Math.min(160, termWidth)
   const wide = dashWidth >= MIN_WIDE
   const halfWidth = wide ? Math.floor(dashWidth / 2) : dashWidth
   const inner = halfWidth - 4
@@ -429,8 +429,8 @@ function Row({ wide, width, children }: { wide: boolean; width: number; children
   return <>{children}</>
 }
 
-function DashboardContent({ projects, period }: { projects: ProjectSummary[]; period: Period }) {
-  const { dashWidth, wide, halfWidth, barWidth } = getLayout()
+function DashboardContent({ projects, period, columns }: { projects: ProjectSummary[]; period: Period; columns?: number }) {
+  const { dashWidth, wide, halfWidth, barWidth } = getLayout(columns)
 
   if (projects.length === 0) {
     return (
@@ -451,17 +451,17 @@ function DashboardContent({ projects, period }: { projects: ProjectSummary[]; pe
         <ProjectBreakdown projects={projects} pw={pw} bw={barWidth} />
       </Row>
 
-      <ActivityBreakdown projects={projects} pw={dashWidth} bw={barWidth} />
-
       <Row wide={wide} width={dashWidth}>
+        <ActivityBreakdown projects={projects} pw={pw} bw={barWidth} />
         <ModelBreakdown projects={projects} pw={pw} bw={barWidth} />
-        <ToolBreakdown projects={projects} pw={pw} bw={barWidth} />
       </Row>
 
       <Row wide={wide} width={dashWidth}>
+        <ToolBreakdown projects={projects} pw={pw} bw={barWidth} />
         <BashBreakdown projects={projects} pw={pw} bw={barWidth} />
-        <McpBreakdown projects={projects} pw={pw} bw={barWidth} />
       </Row>
+
+      <McpBreakdown projects={projects} pw={dashWidth} bw={barWidth} />
     </Box>
   )
 }
@@ -477,7 +477,8 @@ function InteractiveDashboard({ initialProjects, initialPeriod, initialProvider 
   const [loading, setLoading] = useState(false)
   const [activeProvider, setActiveProvider] = useState(initialProvider)
   const [detectedProviders, setDetectedProviders] = useState<string[]>([])
-  const { dashWidth } = getLayout()
+  const { columns } = useWindowSize()
+  const { dashWidth } = getLayout(columns)
   const multipleProviders = detectedProviders.length > 1
 
   useEffect(() => {
@@ -555,18 +556,19 @@ function InteractiveDashboard({ initialProjects, initialPeriod, initialProvider 
   return (
     <Box flexDirection="column" width={dashWidth}>
       <PeriodTabs active={period} providerName={activeProvider} showProvider={multipleProviders} />
-      <DashboardContent projects={projects} period={period} />
+      <DashboardContent projects={projects} period={period} columns={columns} />
       <StatusBar width={dashWidth} showProvider={multipleProviders} />
     </Box>
   )
 }
 
 function StaticDashboard({ projects, period }: { projects: ProjectSummary[]; period: Period }) {
-  const { dashWidth } = getLayout()
+  const { columns } = useWindowSize()
+  const { dashWidth } = getLayout(columns)
   return (
     <Box flexDirection="column" width={dashWidth}>
       <PeriodTabs active={period} />
-      <DashboardContent projects={projects} period={period} />
+      <DashboardContent projects={projects} period={period} columns={columns} />
     </Box>
   )
 }
