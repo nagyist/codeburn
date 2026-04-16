@@ -12,6 +12,7 @@
 - No em dashes. Use hyphens or rewrite the sentence
 - No AI slop: no "streamline", "leverage", "robust", "seamless" in user-facing text
 - No unnecessary abstractions. Three similar lines > premature helper function
+- No magic numbers. Extract layout offsets, column widths, thresholds, timeouts, and any value used in a calculation into a named `const` at module scope. Inline literals are only OK for universally understood constants (0, 1, 100 for percent). If a number appears in a formula like `pw - bw - 31`, the `31` must be a named constant.
 
 ## Accuracy
 - Every user-facing number (cost, tokens, calls) must be verified against real data

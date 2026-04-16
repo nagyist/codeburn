@@ -149,8 +149,9 @@ function Overview({ projects, label, width }: { projects: ProjectSummary[]; labe
   const totalOutput = allSessions.reduce((s, sess) => s + sess.totalOutputTokens, 0)
   const totalCacheRead = allSessions.reduce((s, sess) => s + sess.totalCacheReadTokens, 0)
   const totalCacheWrite = allSessions.reduce((s, sess) => s + sess.totalCacheWriteTokens, 0)
-  const cacheHit = totalInput + totalCacheRead > 0
-    ? (totalCacheRead / (totalInput + totalCacheRead)) * 100 : 0
+  const allInputTokens = totalInput + totalCacheRead + totalCacheWrite
+  const cacheHit = allInputTokens > 0
+    ? (totalCacheRead / allInputTokens) * 100 : 0
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={PANEL_COLORS.overview} paddingX={1} width={width}>
@@ -165,7 +166,7 @@ function Overview({ projects, label, width }: { projects: ProjectSummary[]; labe
         <Text dimColor> calls   </Text>
         <Text bold>{String(totalSessions)}</Text>
         <Text dimColor> sessions   </Text>
-        <Text bold>{cacheHit.toFixed(0)}%</Text>
+        <Text bold>{cacheHit.toFixed(1)}%</Text>
         <Text dimColor> cache hit</Text>
       </Text>
       <Text dimColor wrap="truncate-end">
@@ -245,32 +246,45 @@ function ProjectBreakdown({ projects, pw, bw }: { projects: ProjectSummary[]; pw
   )
 }
 
+const MODEL_COL_COST = 8
+const MODEL_COL_CACHE = 7
+const MODEL_COL_CALLS = 7
+const MODEL_NAME_WIDTH = 14
+
 function ModelBreakdown({ projects, pw, bw }: { projects: ProjectSummary[]; pw: number; bw: number }) {
-  const modelTotals: Record<string, { calls: number; costUSD: number }> = {}
+  const modelTotals: Record<string, { calls: number; costUSD: number; freshInput: number; cacheRead: number; cacheWrite: number }> = {}
   for (const project of projects) {
     for (const session of project.sessions) {
       for (const [model, data] of Object.entries(session.modelBreakdown)) {
-        if (!modelTotals[model]) modelTotals[model] = { calls: 0, costUSD: 0 }
+        if (!modelTotals[model]) modelTotals[model] = { calls: 0, costUSD: 0, freshInput: 0, cacheRead: 0, cacheWrite: 0 }
         modelTotals[model].calls += data.calls
         modelTotals[model].costUSD += data.costUSD
+        modelTotals[model].freshInput += data.tokens.inputTokens
+        modelTotals[model].cacheRead += data.tokens.cacheReadInputTokens
+        modelTotals[model].cacheWrite += data.tokens.cacheCreationInputTokens
       }
     }
   }
   const sorted = Object.entries(modelTotals).sort(([, a], [, b]) => b.costUSD - a.costUSD)
   const maxCost = sorted[0]?.[1]?.costUSD ?? 0
-  const nw = Math.max(6, pw - bw - 25)
 
   return (
     <Panel title="By Model" color={PANEL_COLORS.model} width={pw}>
-      <Text dimColor wrap="truncate-end">{''.padEnd(bw + 1 + nw)}{'cost'.padStart(8)}{'calls'.padStart(7)}</Text>
-      {sorted.map(([model, data], i) => (
-        <Text key={`${model}-${i}`} wrap="truncate-end">
-          <HBar value={data.costUSD} max={maxCost} width={bw} />
-          <Text> {fit(model, nw)}</Text>
-          <Text color={GOLD}>{formatCost(data.costUSD).padStart(8)}</Text>
-          <Text>{String(data.calls).padStart(7)}</Text>
-        </Text>
-      ))}
+      <Text dimColor wrap="truncate-end">{''.padEnd(bw + 1 + MODEL_NAME_WIDTH)}{'cost'.padStart(MODEL_COL_COST)}{'cache'.padStart(MODEL_COL_CACHE)}{'calls'.padStart(MODEL_COL_CALLS)}</Text>
+      {sorted.map(([model, data], i) => {
+        const totalInput = data.freshInput + data.cacheRead + data.cacheWrite
+        const cacheHit = totalInput > 0 ? (data.cacheRead / totalInput) * 100 : 0
+        const cacheLabel = totalInput > 0 ? `${cacheHit.toFixed(1)}%` : '-'
+        return (
+          <Text key={`${model}-${i}`} wrap="truncate-end">
+            <HBar value={data.costUSD} max={maxCost} width={bw} />
+            <Text> {fit(model, MODEL_NAME_WIDTH)}</Text>
+            <Text color={GOLD}>{formatCost(data.costUSD).padStart(MODEL_COL_COST)}</Text>
+            <Text>{cacheLabel.padStart(MODEL_COL_CACHE)}</Text>
+            <Text>{String(data.calls).padStart(MODEL_COL_CALLS)}</Text>
+          </Text>
+        )
+      })}
     </Panel>
   )
 }
