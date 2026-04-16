@@ -132,6 +132,8 @@ function HBar({ value, max, width }: { value: number; max: number; width: number
   )
 }
 
+const PANEL_CHROME = 4
+
 function Panel({ title, color, children, width }: { title: string; color: string; children: React.ReactNode; width: number }) {
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={color} paddingX={1} width={width} overflowX="hidden">
@@ -390,7 +392,7 @@ function TopSessions({ projects, pw, bw }: { projects: ProjectSummary[]; pw: num
   }
 
   const maxCost = top[0].totalCostUSD
-  const nw = Math.max(8, pw - bw - TOP_SESSIONS_COST_COL - TOP_SESSIONS_CALLS_COL - 1)
+  const nw = Math.max(8, pw - bw - TOP_SESSIONS_COST_COL - TOP_SESSIONS_CALLS_COL - 1 - PANEL_CHROME)
 
   return (
     <Panel title="Top Sessions" color={PANEL_COLORS.sessions} width={pw}>
