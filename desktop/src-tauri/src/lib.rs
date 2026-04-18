@@ -113,10 +113,31 @@ fn toggle_popover(app: &AppHandle) {
             let _ = window.hide();
         }
         _ => {
+            position_popover_top_right(&window);
             let _ = window.show();
             let _ = window.set_focus();
         }
     }
+}
+
+/// Snap the popover to the top-right of the primary monitor, just below the GNOME
+/// top panel. Linux window managers generally ignore the tray icon's screen position,
+/// so there is no reliable anchor to attach to. Top-right keeps the window visually
+/// close to the StatusNotifier area on every desktop we target (GNOME, KDE, Unity).
+fn position_popover_top_right(window: &tauri::WebviewWindow) {
+    const MARGIN_PX: u32 = 12;
+    const TOP_PANEL_PX: u32 = 36;
+
+    let Ok(Some(monitor)) = window.primary_monitor() else {
+        return;
+    };
+    let Ok(size) = window.outer_size() else {
+        return;
+    };
+    let screen = monitor.size();
+    let x = screen.width.saturating_sub(size.width).saturating_sub(MARGIN_PX);
+    let y = TOP_PANEL_PX;
+    let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
 }
 
 mod commands {
