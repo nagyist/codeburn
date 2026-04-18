@@ -1,13 +1,14 @@
 /*
  * CodeBurn GNOME Shell extension.
  *
- * Renders a flame + current-period cost label in the top panel and opens a native
- * PopupMenu on click. Unlike the Tauri tray app (desktop/), this lives inside
- * gnome-shell so it can anchor the popover directly under the panel button,
- * matching Ubuntu's Quick Settings feel.
+ * Ships a native GNOME panel button whose popup mirrors the macOS app pixel for
+ * pixel, built out of raw St widgets instead of the stock PopupMenu text-item
+ * list. Horizontal agent tabs, a branded header, hero cost typography, inline
+ * bar-chart activity rows, and a pill-styled footer -- same primitives GNOME's
+ * own Quick Settings panel uses.
  *
- * Data source: `codeburn status --format menubar-json --period <p>`, polled every
- * 60s. The period is a per-session preference held in memory on the indicator.
+ * Data source: `codeburn status --format menubar-json --period <p> --provider <pr>`,
+ * polled every 60 seconds. Period, provider and currency are per-session state.
  */
 
 import GObject from 'gi://GObject';
@@ -23,8 +24,6 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 const REFRESH_INTERVAL_SECONDS = 60;
 const TOP_ACTIVITIES = 5;
-const TOP_MODELS = 3;
-const TOP_PROVIDERS = 4;
 const CODEBURN_BIN = 'codeburn';
 
 const PERIODS = [
@@ -32,7 +31,7 @@ const PERIODS = [
     {id: 'week', label: '7 Days'},
     {id: '30days', label: '30 Days'},
     {id: 'month', label: 'Month'},
-    {id: 'all', label: 'All Time'},
+    {id: 'all', label: 'All'},
 ];
 
 const PROVIDERS = [
@@ -43,8 +42,6 @@ const PROVIDERS = [
     {id: 'copilot', label: 'Copilot'},
 ];
 
-// Matches the 17 currencies the Mac menubar ships with. Symbols fall back to the
-// ISO code with a trailing space for anything less common.
 const CURRENCIES = [
     {code: 'USD', symbol: '$'},
     {code: 'EUR', symbol: '€'},
@@ -77,15 +74,12 @@ class CodeburnIndicator extends PanelMenu.Button {
         this._timeout = null;
         this._payload = null;
 
-        // Follow the GNOME system color-scheme so the popup stays readable on both
-        // light and dark themes. Adds .codeburn-dark / .codeburn-light to the root
-        // widget so stylesheet.css can tweak per-theme without fighting the shell's
-        // inherited palette.
         this._themeSettings = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
         this._themeSignal = this._themeSettings.connect('changed::color-scheme', () => this._applyThemeClass());
         this._applyThemeClass();
 
-        const box = new St.BoxLayout({style_class: 'panel-status-menu-box codeburn-panel'});
+        // Panel button: flame + live cost label
+        const panel = new St.BoxLayout({style_class: 'panel-status-menu-box codeburn-panel'});
         this._flame = new St.Label({
             text: '🔥',
             y_align: Clutter.ActorAlign.CENTER,
@@ -96,11 +90,32 @@ class CodeburnIndicator extends PanelMenu.Button {
             y_align: Clutter.ActorAlign.CENTER,
             style_class: 'codeburn-label',
         });
-        box.add_child(this._flame);
-        box.add_child(this._label);
-        this.add_child(box);
+        panel.add_child(this._flame);
+        panel.add_child(this._label);
+        this.add_child(panel);
 
-        this._buildMenu();
+        // Replace the default PopupMenu item list with a single container that we
+        // paint with custom St widgets so the layout can be horizontal tabs + hero
+        // + bar charts + footer, not a vertical text list.
+        this.menu.box.add_style_class_name('codeburn-menu');
+        this._popupHost = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
+        this._popupHost.add_style_class_name('codeburn-host');
+        this.menu.addMenuItem(this._popupHost);
+
+        this._root = new St.BoxLayout({
+            vertical: true,
+            style_class: 'codeburn-root',
+            x_expand: true,
+        });
+        this._popupHost.add_child(this._root);
+
+        this._buildBrandHeader();
+        this._buildAgentTabs();
+        this._buildHero();
+        this._buildPeriodTabs();
+        this._buildActivitySection();
+        this._buildFindingsSection();
+        this._buildFooter();
 
         this._refresh();
         this._timeout = GLib.timeout_add_seconds(
@@ -113,96 +128,152 @@ class CodeburnIndicator extends PanelMenu.Button {
         );
     }
 
-    _buildMenu() {
-        // Header: period + hero cost + calls + sessions
-        this._headerItem = new PopupMenu.PopupMenuItem('Loading…', {reactive: false});
-        this._headerItem.label.style_class = 'codeburn-header';
-        this.menu.addMenuItem(this._headerItem);
+    _buildBrandHeader() {
+        const header = new St.BoxLayout({vertical: true, style_class: 'codeburn-brand-header'});
+        const title = new St.BoxLayout({style_class: 'codeburn-brand-row'});
+        const titleLeft = new St.Label({text: 'Code', style_class: 'codeburn-brand-primary'});
+        const titleRight = new St.Label({text: 'Burn', style_class: 'codeburn-brand-accent'});
+        title.add_child(titleLeft);
+        title.add_child(titleRight);
+        const subhead = new St.Label({text: 'AI Coding Cost Tracker', style_class: 'codeburn-brand-subhead'});
+        header.add_child(title);
+        header.add_child(subhead);
+        this._root.add_child(header);
+    }
 
-        this._metaItem = new PopupMenu.PopupMenuItem('', {reactive: false});
-        this._metaItem.label.style_class = 'codeburn-meta';
-        this.menu.addMenuItem(this._metaItem);
-
-        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-
-        // Agent (provider filter) submenu
-        this._providerSubmenu = new PopupMenu.PopupSubMenuMenuItem(this._providerLabel());
+    _buildAgentTabs() {
+        const row = new St.BoxLayout({style_class: 'codeburn-tab-row'});
+        this._agentTabs = new Map();
         for (const p of PROVIDERS) {
-            const item = new PopupMenu.PopupMenuItem(p.label);
-            item.connect('activate', () => {
+            const btn = new St.Button({
+                label: p.label,
+                style_class: 'codeburn-tab',
+                can_focus: true,
+                x_expand: true,
+            });
+            btn.connect('clicked', () => {
                 this._provider = p.id;
-                this._providerSubmenu.label.set_text(this._providerLabel());
+                this._updateAgentTabStyle();
                 this._refresh();
             });
-            this._providerSubmenu.menu.addMenuItem(item);
+            row.add_child(btn);
+            this._agentTabs.set(p.id, btn);
         }
-        this.menu.addMenuItem(this._providerSubmenu);
+        this._root.add_child(row);
+        this._updateAgentTabStyle();
+    }
 
-        // Period switcher submenu
-        this._periodSubmenu = new PopupMenu.PopupSubMenuMenuItem(this._periodLabel());
+    _updateAgentTabStyle() {
+        for (const [id, btn] of this._agentTabs) {
+            if (id === this._provider) btn.add_style_class_name('codeburn-tab-active');
+            else btn.remove_style_class_name('codeburn-tab-active');
+        }
+    }
+
+    _buildHero() {
+        const hero = new St.BoxLayout({vertical: true, style_class: 'codeburn-hero'});
+        const topLine = new St.BoxLayout({style_class: 'codeburn-hero-top'});
+        this._heroDot = new St.Widget({style_class: 'codeburn-hero-dot'});
+        this._heroLabel = new St.Label({text: 'Loading…', style_class: 'codeburn-hero-label'});
+        topLine.add_child(this._heroDot);
+        topLine.add_child(this._heroLabel);
+        this._heroAmount = new St.Label({text: '$0.00', style_class: 'codeburn-hero-amount'});
+        this._heroMeta = new St.Label({text: '', style_class: 'codeburn-hero-meta'});
+        hero.add_child(topLine);
+        hero.add_child(this._heroAmount);
+        hero.add_child(this._heroMeta);
+        this._root.add_child(hero);
+    }
+
+    _buildPeriodTabs() {
+        const row = new St.BoxLayout({style_class: 'codeburn-tab-row codeburn-period-row'});
+        this._periodTabs = new Map();
         for (const p of PERIODS) {
-            const item = new PopupMenu.PopupMenuItem(p.label);
-            item.connect('activate', () => {
+            const btn = new St.Button({
+                label: p.label,
+                style_class: 'codeburn-period',
+                can_focus: true,
+                x_expand: true,
+            });
+            btn.connect('clicked', () => {
                 this._period = p.id;
-                this._periodSubmenu.label.set_text(this._periodLabel());
+                this._updatePeriodTabStyle();
                 this._refresh();
             });
-            this._periodSubmenu.menu.addMenuItem(item);
+            row.add_child(btn);
+            this._periodTabs.set(p.id, btn);
         }
-        this.menu.addMenuItem(this._periodSubmenu);
+        this._root.add_child(row);
+        this._updatePeriodTabStyle();
+    }
 
-        // Currency submenu
-        this._currencySubmenu = new PopupMenu.PopupSubMenuMenuItem(this._currencyLabel());
-        for (const c of CURRENCIES) {
-            const item = new PopupMenu.PopupMenuItem(c.code);
-            item.connect('activate', () => this._setCurrency(c.code));
-            this._currencySubmenu.menu.addMenuItem(item);
+    _updatePeriodTabStyle() {
+        for (const [id, btn] of this._periodTabs) {
+            if (id === this._period) btn.add_style_class_name('codeburn-period-active');
+            else btn.remove_style_class_name('codeburn-period-active');
         }
-        this.menu.addMenuItem(this._currencySubmenu);
-
-        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-
-        // Activities, models, providers, findings (populated on render)
-        this._activitySection = new PopupMenu.PopupMenuSection();
-        this.menu.addMenuItem(this._activitySection);
-
-        this._modelsSection = new PopupMenu.PopupMenuSection();
-        this.menu.addMenuItem(this._modelsSection);
-
-        this._providersSection = new PopupMenu.PopupMenuSection();
-        this.menu.addMenuItem(this._providersSection);
-
-        this._findingsSection = new PopupMenu.PopupMenuSection();
-        this.menu.addMenuItem(this._findingsSection);
-
-        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-
-        // Footer: updated timestamp, refresh, open full report
-        this._updatedItem = new PopupMenu.PopupMenuItem('', {reactive: false});
-        this._updatedItem.label.style_class = 'codeburn-updated';
-        this.menu.addMenuItem(this._updatedItem);
-
-        const refresh = new PopupMenu.PopupMenuItem('Refresh');
-        refresh.connect('activate', () => this._refresh());
-        this.menu.addMenuItem(refresh);
-
-        const openReport = new PopupMenu.PopupMenuItem('Open Full Report');
-        openReport.connect('activate', () => this._spawnTerminal([CODEBURN_BIN, 'report', '--period', this._period, '--provider', this._provider]));
-        this.menu.addMenuItem(openReport);
     }
 
-    _periodLabel() {
-        const p = PERIODS.find(x => x.id === this._period);
-        return `Period · ${p ? p.label : this._period}`;
+    _buildActivitySection() {
+        const section = new St.BoxLayout({vertical: true, style_class: 'codeburn-activity'});
+        const title = new St.Label({text: 'Activity', style_class: 'codeburn-section-title'});
+        section.add_child(title);
+        this._activityRows = new St.BoxLayout({vertical: true, style_class: 'codeburn-activity-rows'});
+        section.add_child(this._activityRows);
+        this._root.add_child(section);
     }
 
-    _providerLabel() {
-        const p = PROVIDERS.find(x => x.id === this._provider);
-        return `Agent · ${p ? p.label : this._provider}`;
+    _buildFindingsSection() {
+        this._findingsBtn = new St.Button({style_class: 'codeburn-findings', visible: false});
+        const box = new St.BoxLayout({style_class: 'codeburn-findings-inner'});
+        this._findingsCount = new St.Label({text: '', style_class: 'codeburn-findings-count'});
+        this._findingsSavings = new St.Label({text: '', style_class: 'codeburn-findings-savings'});
+        box.add_child(this._findingsCount);
+        box.add_child(this._findingsSavings);
+        this._findingsBtn.set_child(box);
+        this._findingsBtn.connect('clicked', () => this._spawnTerminal([CODEBURN_BIN, 'optimize']));
+        this._root.add_child(this._findingsBtn);
     }
 
-    _currencyLabel() {
-        return `Currency · ${this._currency.code}`;
+    _buildFooter() {
+        const footer = new St.BoxLayout({style_class: 'codeburn-footer'});
+
+        this._currencyBtn = new St.Button({
+            label: `${this._currency.code} ⌄`,
+            style_class: 'codeburn-footer-btn codeburn-currency-btn',
+            can_focus: true,
+        });
+        this._currencyBtn.connect('clicked', () => this._cycleCurrency());
+        footer.add_child(this._currencyBtn);
+
+        const refreshBtn = new St.Button({
+            label: 'Refresh',
+            style_class: 'codeburn-footer-btn',
+            can_focus: true,
+            x_expand: true,
+        });
+        refreshBtn.connect('clicked', () => this._refresh());
+        footer.add_child(refreshBtn);
+
+        const reportBtn = new St.Button({
+            label: 'Open Full Report',
+            style_class: 'codeburn-footer-btn codeburn-footer-cta',
+            can_focus: true,
+            x_expand: true,
+        });
+        reportBtn.connect('clicked', () => this._spawnTerminal([CODEBURN_BIN, 'report', '--period', this._period, '--provider', this._provider]));
+        footer.add_child(reportBtn);
+
+        this._root.add_child(footer);
+
+        this._updatedLabel = new St.Label({text: '', style_class: 'codeburn-updated'});
+        this._root.add_child(this._updatedLabel);
+    }
+
+    _cycleCurrency() {
+        const idx = CURRENCIES.findIndex(c => c.code === this._currency.code);
+        const next = CURRENCIES[(idx + 1) % CURRENCIES.length];
+        this._setCurrency(next.code);
     }
 
     _loadCurrency() {
@@ -235,7 +306,7 @@ class CodeburnIndicator extends PanelMenu.Button {
         }
         proc.wait_async(null, () => {
             this._currency = this._loadCurrency();
-            this._currencySubmenu.label.set_text(this._currencyLabel());
+            this._currencyBtn.set_label(`${this._currency.code} ⌄`);
             this._refresh();
         });
     }
@@ -243,7 +314,6 @@ class CodeburnIndicator extends PanelMenu.Button {
     _refresh() {
         if (this._loading) return;
         this._loading = true;
-        this._headerItem.label.set_text(this._payload ? this._headerItem.label.get_text() : 'Loading…');
 
         let proc;
         try {
@@ -251,9 +321,9 @@ class CodeburnIndicator extends PanelMenu.Button {
                 [CODEBURN_BIN, 'status', '--format', 'menubar-json', '--period', this._period, '--provider', this._provider],
                 Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE,
             );
-        } catch (e) {
+        } catch (_) {
             this._loading = false;
-            this._renderError('codeburn CLI not found on PATH. Install the npm package first.');
+            this._renderError('codeburn CLI not found on PATH');
             return;
         }
 
@@ -269,9 +339,8 @@ class CodeburnIndicator extends PanelMenu.Button {
                     this._renderError('codeburn returned no output');
                     return;
                 }
-                const payload = JSON.parse(stdout);
-                this._payload = payload;
-                this._render(payload);
+                this._payload = JSON.parse(stdout);
+                this._render(this._payload);
             } catch (e) {
                 this._renderError(`parse error: ${e.message}`);
             }
@@ -281,115 +350,100 @@ class CodeburnIndicator extends PanelMenu.Button {
     _render(payload) {
         const current = payload?.current ?? {};
         const cost = Number(current.cost ?? 0);
-        const formatted = formatCost(cost, this._currency);
 
-        this._label.set_text(formatted);
+        this._label.set_text(formatCost(cost, this._currency));
+        this._heroLabel.set_text(current.label || '');
+        this._heroAmount.set_text(formatCost(cost, this._currency));
 
-        const label = current.label ?? '';
         const calls = Number(current.calls ?? 0);
         const sessions = Number(current.sessions ?? 0);
-        const oneShot = current.oneShotRate;
-        const cacheHit = Number(current.cacheHitPercent ?? 0);
+        this._heroMeta.set_text(`${calls.toLocaleString()} calls   ${sessions} sessions`);
 
-        this._headerItem.label.set_text(`${label}   ${formatted}`);
-        const metaParts = [
-            `${calls.toLocaleString()} calls`,
-            `${sessions} sessions`,
-            `${cacheHit.toFixed(0)}% cache`,
-        ];
-        if (oneShot !== null && oneShot !== undefined) {
-            metaParts.push(`${Math.round(Number(oneShot) * 100)}% 1-shot`);
-        }
-        this._metaItem.label.set_text(metaParts.join('   '));
-
-        this._renderActivities(current.topActivities ?? []);
-        this._renderModels(current.topModels ?? []);
-        this._renderProviders(current.providers ?? {});
+        this._renderActivity(Array.isArray(current.topActivities) ? current.topActivities : []);
         this._renderFindings(payload?.optimize ?? {});
 
         const updated = payload?.generated ? formatTime(new Date(payload.generated)) : '';
-        this._updatedItem.label.set_text(updated ? `Updated ${updated}` : '');
+        this._updatedLabel.set_text(updated ? `Updated ${updated}` : '');
     }
 
-    _renderActivities(activities) {
-        this._activitySection.removeAll();
+    _renderActivity(activities) {
+        this._activityRows.destroy_all_children();
         if (!activities.length) {
-            const empty = new PopupMenu.PopupMenuItem('No activity for this period', {reactive: false});
-            empty.label.style_class = 'codeburn-empty';
-            this._activitySection.addMenuItem(empty);
+            const empty = new St.Label({text: 'No activity for this period', style_class: 'codeburn-empty'});
+            this._activityRows.add_child(empty);
             return;
         }
-        const title = new PopupMenu.PopupMenuItem('Activity', {reactive: false});
-        title.label.style_class = 'codeburn-section-title';
-        this._activitySection.addMenuItem(title);
+        const maxCost = activities.reduce((m, a) => Math.max(m, Number(a.cost) || 0), 0) || 1;
         for (const a of activities.slice(0, TOP_ACTIVITIES)) {
-            const oneShot = a.oneShotRate;
-            const tail = oneShot == null
-                ? `${a.turns} turns`
-                : `${a.turns} turns   ${Math.round(Number(oneShot) * 100)}% 1-shot`;
-            const line = `  ${a.name.padEnd(14)} ${formatCost(a.cost, this._currency).padStart(8)}   ${tail}`;
-            const item = new PopupMenu.PopupMenuItem(line, {reactive: false});
-            item.label.style_class = 'codeburn-row';
-            this._activitySection.addMenuItem(item);
+            this._activityRows.add_child(this._buildActivityRow(a, maxCost));
         }
     }
 
-    _renderModels(models) {
-        this._modelsSection.removeAll();
-        if (!models.length) return;
-        const title = new PopupMenu.PopupMenuItem('Models', {reactive: false});
-        title.label.style_class = 'codeburn-section-title';
-        this._modelsSection.addMenuItem(title);
-        for (const m of models.slice(0, TOP_MODELS)) {
-            const calls = Number(m.calls ?? 0).toLocaleString();
-            const line = `  ${m.name.padEnd(18)} ${formatCost(m.cost, this._currency).padStart(8)}   ${calls} calls`;
-            const item = new PopupMenu.PopupMenuItem(line, {reactive: false});
-            item.label.style_class = 'codeburn-row';
-            this._modelsSection.addMenuItem(item);
-        }
-    }
+    _buildActivityRow(activity, maxCost) {
+        const row = new St.BoxLayout({vertical: true, style_class: 'codeburn-activity-row'});
 
-    _renderProviders(providers) {
-        this._providersSection.removeAll();
-        const entries = Object.entries(providers).filter(([, cost]) => Number(cost) > 0);
-        if (entries.length <= 1) return;
-        entries.sort((a, b) => Number(b[1]) - Number(a[1]));
-        const title = new PopupMenu.PopupMenuItem('Providers', {reactive: false});
-        title.label.style_class = 'codeburn-section-title';
-        this._providersSection.addMenuItem(title);
-        for (const [name, cost] of entries.slice(0, TOP_PROVIDERS)) {
-            const line = `  ${capitalize(name).padEnd(14)} ${formatCost(Number(cost), this._currency).padStart(8)}`;
-            const item = new PopupMenu.PopupMenuItem(line, {reactive: false});
-            item.label.style_class = 'codeburn-row';
-            this._providersSection.addMenuItem(item);
+        const topLine = new St.BoxLayout({style_class: 'codeburn-activity-top'});
+        const name = new St.Label({
+            text: activity.name,
+            style_class: 'codeburn-activity-name',
+            x_expand: true,
+        });
+        const cost = new St.Label({
+            text: formatCost(activity.cost, this._currency),
+            style_class: 'codeburn-activity-cost',
+        });
+        const turns = new St.Label({
+            text: `${Number(activity.turns) || 0}t`,
+            style_class: 'codeburn-activity-turns',
+        });
+        topLine.add_child(name);
+        topLine.add_child(cost);
+        topLine.add_child(turns);
+        if (activity.oneShotRate !== null && activity.oneShotRate !== undefined) {
+            const oneShot = new St.Label({
+                text: `${Math.round(Number(activity.oneShotRate) * 100)}%`,
+                style_class: 'codeburn-activity-oneshot',
+            });
+            topLine.add_child(oneShot);
         }
+        row.add_child(topLine);
+
+        // Bar chart: track + filled portion. Width is proportional to this activity's
+        // share of the top cost. St widgets let us just set widths in pixels.
+        const track = new St.Widget({style_class: 'codeburn-bar-track', y_expand: false});
+        const filledPct = Math.max(0.02, Math.min(1, Number(activity.cost) / maxCost));
+        const fill = new St.Widget({
+            style_class: 'codeburn-bar-fill',
+            width: Math.round(240 * filledPct),
+        });
+        track.add_child(fill);
+        row.add_child(track);
+
+        return row;
     }
 
     _renderFindings(optimize) {
-        this._findingsSection.removeAll();
         const count = Number(optimize?.findingCount ?? 0);
-        if (count === 0) return;
+        if (count === 0) {
+            this._findingsBtn.hide();
+            return;
+        }
         const savings = Number(optimize?.savingsUSD ?? 0);
-        const text = `⚠  ${count} optimize findings   save ~${formatCost(savings, this._currency)}`;
-        const item = new PopupMenu.PopupMenuItem(text);
-        item.label.style_class = 'codeburn-findings';
-        item.connect('activate', () => this._spawnTerminal([CODEBURN_BIN, 'optimize']));
-        this._findingsSection.addMenuItem(item);
+        this._findingsCount.set_text(`⚠  ${count} optimize findings`);
+        this._findingsSavings.set_text(`save ~${formatCost(savings, this._currency)}`);
+        this._findingsBtn.show();
     }
 
     _renderError(message) {
         this._label.set_text('!');
-        this._headerItem.label.set_text(message);
-        this._metaItem.label.set_text('');
-        this._activitySection.removeAll();
-        this._modelsSection.removeAll();
-        this._providersSection.removeAll();
-        this._findingsSection.removeAll();
+        this._heroLabel.set_text(message);
+        this._heroAmount.set_text('');
+        this._heroMeta.set_text('');
+        this._activityRows.destroy_all_children();
+        this._findingsBtn.hide();
     }
 
     _spawnTerminal(argv) {
-        // Quote arguments into a single command string for bash -lc. argv here only ever
-        // contains static identifiers from our own code so plain join is safe.
         const command = `${argv.join(' ')}; echo; read -n 1 -s -r -p 'Press any key to close...'`;
         try {
             Gio.Subprocess.new(
@@ -399,6 +453,7 @@ class CodeburnIndicator extends PanelMenu.Button {
         } catch (e) {
             log(`codeburn: terminal spawn error: ${e.message}`);
         }
+        this.menu.close();
     }
 
     _applyThemeClass() {
@@ -440,11 +495,6 @@ function formatTime(date) {
     if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
     if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
     return date.toLocaleDateString();
-}
-
-function capitalize(s) {
-    if (!s) return s;
-    return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 export default class CodeburnExtension extends Extension {

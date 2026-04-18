@@ -1,76 +1,271 @@
 /*
  * CodeBurn GNOME Shell extension styles.
  *
- * Inherits colors from the active GNOME shell theme so the popup looks native on
- * both light and dark system themes. Only the brand accent (orange) is hardcoded;
- * every other color is left to the theme. Typography and spacing are tight to
- * keep the popup compact even when every section is populated.
+ * Designed to match the macOS popover pixel for pixel within what St widgets
+ * can paint: branded header, horizontal tab rows with pill active states, hero
+ * typography, inline bar-chart activity rows, and a pill-styled footer.
+ *
+ * Colors inherit the shell theme by default; brand orange (#ff8c42 to #c9521d)
+ * is the only hardcoded palette so the design survives both Light and Dark
+ * system themes.
  */
 
+/* ---- panel button ---- */
 .codeburn-panel {
     spacing: 4px;
 }
-
 .codeburn-flame {
     font-size: 14px;
 }
-
 .codeburn-label {
     font-weight: 500;
     padding-left: 2px;
     padding-right: 2px;
 }
 
-.codeburn-header {
-    font-weight: 600;
+/* ---- popup host ---- */
+.codeburn-menu {
+    padding: 0;
+}
+.codeburn-host {
+    padding: 0;
+    margin: 0;
+    background: transparent;
+    border: none;
+}
+.codeburn-host:hover,
+.codeburn-host:focus,
+.codeburn-host:active,
+.codeburn-host:selected {
+    background: transparent;
+}
+.codeburn-root {
+    width: 340px;
+    padding: 0;
+    spacing: 0;
+}
+
+/* ---- brand header ---- */
+.codeburn-brand-header {
+    padding: 14px 16px 10px 16px;
+    spacing: 2px;
+}
+.codeburn-brand-row {
+    spacing: 0;
+}
+.codeburn-brand-primary {
+    font-weight: 700;
+    font-size: 18px;
+}
+.codeburn-brand-accent {
+    font-weight: 700;
+    font-size: 18px;
     color: #ff8c42;
-    font-size: 13px;
+}
+.codeburn-brand-subhead {
+    font-size: 10.5px;
+    opacity: 0.55;
+    letter-spacing: 0.3px;
 }
 
-.codeburn-meta {
+/* ---- tab rows ---- */
+.codeburn-tab-row {
+    padding: 4px 10px 8px 10px;
+    spacing: 4px;
+}
+.codeburn-period-row {
+    padding-top: 0;
+    padding-bottom: 10px;
+}
+.codeburn-tab,
+.codeburn-period {
+    padding: 5px 6px;
+    border-radius: 6px;
     font-size: 11px;
-    opacity: 0.75;
+    font-weight: 500;
+    background: transparent;
+    border: none;
+    opacity: 0.7;
+    transition-duration: 80ms;
+}
+.codeburn-tab:hover,
+.codeburn-period:hover {
+    background: rgba(255, 140, 66, 0.08);
+    opacity: 1;
+}
+.codeburn-tab-active,
+.codeburn-period-active {
+    background: rgba(255, 140, 66, 0.18);
+    color: #ff8c42;
+    opacity: 1;
+    font-weight: 600;
 }
 
+/* ---- hero ---- */
+.codeburn-hero {
+    padding: 4px 16px 10px 16px;
+    spacing: 2px;
+}
+.codeburn-hero-top {
+    spacing: 6px;
+}
+.codeburn-hero-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 3px;
+    background-color: #ff8c42;
+    margin-top: 7px;
+}
+.codeburn-hero-label {
+    font-size: 11px;
+    opacity: 0.65;
+    font-weight: 500;
+}
+.codeburn-hero-amount {
+    font-size: 28px;
+    font-weight: 700;
+    color: #ffd700;
+}
+.codeburn-hero-meta {
+    font-size: 11px;
+    opacity: 0.6;
+}
+
+/* ---- activity section ---- */
+.codeburn-activity {
+    padding: 6px 16px 10px 16px;
+    spacing: 6px;
+}
 .codeburn-section-title {
     font-weight: 600;
     font-size: 11px;
     opacity: 0.6;
-    padding-top: 4px;
     padding-bottom: 2px;
 }
-
-.codeburn-row {
-    font-family: monospace;
-    font-size: 11.5px;
-    padding-left: 4px;
-    padding-right: 4px;
+.codeburn-activity-rows {
+    spacing: 8px;
 }
-
+.codeburn-activity-row {
+    spacing: 3px;
+}
+.codeburn-activity-top {
+    spacing: 6px;
+}
+.codeburn-activity-name {
+    font-size: 11.5px;
+    font-weight: 500;
+}
+.codeburn-activity-cost {
+    font-size: 11.5px;
+    font-family: monospace;
+    font-weight: 600;
+    color: #ffd700;
+}
+.codeburn-activity-turns {
+    font-size: 10.5px;
+    font-family: monospace;
+    opacity: 0.6;
+    min-width: 28px;
+    text-align: right;
+}
+.codeburn-activity-oneshot {
+    font-size: 10.5px;
+    font-family: monospace;
+    opacity: 0.8;
+    color: #5bf58c;
+    min-width: 36px;
+    text-align: right;
+}
+.codeburn-bar-track {
+    height: 4px;
+    border-radius: 2px;
+    background-color: rgba(255, 255, 255, 0.08);
+    width: 240px;
+}
+.codeburn-bar-fill {
+    height: 4px;
+    border-radius: 2px;
+    background: linear-gradient(to right, #ff8c42, #c9521d);
+}
 .codeburn-empty {
     font-style: italic;
     opacity: 0.55;
-    padding-left: 8px;
+    padding: 6px 0;
 }
 
+/* ---- findings CTA ---- */
 .codeburn-findings {
+    margin: 2px 16px 10px 16px;
+    padding: 9px 11px;
+    border-radius: 8px;
+    background: rgba(255, 140, 66, 0.12);
+    border: none;
+    transition-duration: 120ms;
+}
+.codeburn-findings:hover {
+    background: rgba(255, 140, 66, 0.2);
+}
+.codeburn-findings-inner {
+    spacing: 0;
+}
+.codeburn-findings-count {
+    font-size: 11.5px;
+    font-weight: 600;
     color: #ff8c42;
+    x-expand: true;
+}
+.codeburn-findings-savings {
+    font-size: 11.5px;
     font-weight: 500;
+    color: #ff8c42;
+    opacity: 0.8;
 }
 
+/* ---- footer ---- */
+.codeburn-footer {
+    padding: 10px 12px;
+    spacing: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.codeburn-footer-btn {
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    border: none;
+    font-size: 11px;
+    font-weight: 500;
+    transition-duration: 80ms;
+}
+.codeburn-footer-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+.codeburn-currency-btn {
+    font-family: monospace;
+    min-width: 62px;
+}
+.codeburn-footer-cta {
+    background: #c9521d;
+    color: #ffffff;
+}
+.codeburn-footer-cta:hover {
+    background: #ff8c42;
+}
 .codeburn-updated {
     font-size: 10px;
-    opacity: 0.5;
-    padding-left: 4px;
+    opacity: 0.45;
+    padding: 0 16px 10px 16px;
 }
 
-/* Optional: theme-specific tweaks if the inherited colors look off. Both classes
- * are set dynamically by extension.js so we can override per-theme without
- * fighting the shell's default popup palette. */
-.codeburn-dark .codeburn-row {
-    /* Monospace can render thin on dark themes; bump weight slightly. */
+/* ---- dark / light theme hooks ---- */
+.codeburn-light .codeburn-bar-track {
+    background-color: rgba(0, 0, 0, 0.08);
 }
-
-.codeburn-light .codeburn-row {
-    /* Nothing yet; placeholder for light-theme specific adjustments. */
+.codeburn-light .codeburn-footer-btn {
+    background: rgba(0, 0, 0, 0.04);
+}
+.codeburn-light .codeburn-footer-btn:hover {
+    background: rgba(0, 0, 0, 0.08);
+}
+.codeburn-light .codeburn-footer {
+    border-top-color: rgba(0, 0, 0, 0.08);
 }
