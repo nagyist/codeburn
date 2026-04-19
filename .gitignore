@@ -15,6 +15,7 @@ Thumbs.db
 
 # Planning artifacts (internal, not shipped)
 docs/superpowers/
+.claude/
 
 # Config / secrets
 .env
@@ -32,3 +33,6 @@ npm-debug.log*
 
 # Build artifacts
 *.tsbuildinfo
+
+# Local Discord brand / promo assets not yet ready to publish
+assets/discord-*.png

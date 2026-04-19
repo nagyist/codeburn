@@ -1,5 +1,117 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **`codeburn report --from/--to`.** Filter sessions to an exact `YYYY-MM-DD` date range (local time). Either flag alone is valid: `--from` alone runs from the given date through end-of-today, `--to` alone runs from the earliest data through the given date. Inverted ranges or malformed dates exit with a clear error. In the TUI, pressing `1`-`5` still switches to the predefined periods. Credit: @lfl1337 (PR #80).
+- **`avgCostPerSession` in reports.** JSON `projects[]` entries gain an `avgCostPerSession` field and `export -f csv` adds an `Avg/Session (USD)` column to `projects.csv`. Column order in `projects.csv` is now `Project, Cost, Avg/Session, Share, API Calls, Sessions` -- scripts parsing by column position should read by header instead. Credit: @lfl1337 (PR #80).
+
+### Security
+- **Semgrep CI guard against prototype pollution regressions.** New `.github/workflows/ci.yml` runs a bracket-assign guard on `src/providers/` and `src/parser.ts` on every push to main and every PR. Blocks re-introducing `$MAP[$KEY] = $MAP[$KEY] ?? $INIT` patterns on `{}`-initialized maps. `categoryBreakdown` in `parser.ts` switched to `Object.create(null)` for consistency with its sibling breakdown maps. Credit: @lfl1337 (PR #78).
+
+## 0.7.3 - 2026-04-18
+
+### Changed
+- **Dropped `better-sqlite3` in favor of Node's built-in `node:sqlite`.** Removes the deprecated `prebuild-install` transitive dependency that npm warned about on every install (issue #75, credit @primeminister). End-user install is now 40 packages down from 167 and shows zero deprecation notices. The experimental-SQLite warning Node 22/23 normally prints on module load is silenced for this specific warning; other warnings pass through unchanged.
+- **Minimum Node version raised to 22.** Node 20 reached EOL on 2026-04-30; `node:sqlite` lives in 22+. Users on older Node get a clear upgrade message when a SQLite-backed provider (Cursor, OpenCode) is loaded.
+
+
+## 0.7.2 - 2026-04-17
+
+### Added
+- **Native macOS menubar app.** Swift + SwiftUI app under `mac/` replaces the SwiftBar plugin. Agent tabs, Today/7/30/Month/All period switcher, Trend/Forecast/Pulse/Stats/Plan insights, activity and model breakdowns, optimize findings, CSV/JSON export, instant currency switching, live 60s refresh.
+- **`codeburn menubar`.** One-command install: downloads the latest `.app` from GitHub Releases, strips Gatekeeper quarantine, drops it into `~/Applications`, and launches it. `--force` reinstalls in place.
+- **`status --format menubar-json`.** Structured payload consumed by the native menubar app. Current-period totals, per-activity and per-model breakdowns, provider costs, optimize findings, and 365-day history.
+- **Release workflow.** `.github/workflows/release-menubar.yml` builds a universal `.app` bundle and zip on `mac-v*` tag push.
+
+### Changed
+- **`codeburn export -f csv`** now writes a folder of one-table-per-file CSVs (`summary`, `daily`, `activity`, `models`, `projects`, `sessions`, `tools`, `shell-commands`) plus a `README.txt` index. Each file opens cleanly as a single table in any spreadsheet.
+- **`codeburn export -f json`** upgraded to schema `codeburn.export.v2` with currency metadata.
+
+### Fixed
+- **`codeburn status` terminal Today/Month** now buckets by local date instead of UTC, so spend shows correctly during the window between local midnight and UTC midnight.
+- **FX rate validation.** Frankfurter responses are checked to be finite and within `[0.0001, 1_000_000]` before they affect displayed costs.
+
+### Removed
+- **SwiftBar plugin.** `src/menubar.ts`, `codeburn install-menubar`, `codeburn uninstall-menubar`, and `status --format menubar` are gone. The native Swift app is the single menubar surface.
+
+### Security
+- **`codeburn export -o` guard.** Writes a `.codeburn-export` marker into every folder it creates and refuses to reuse non-marked directories or overwrite existing files, so a typo like `-o ~/.ssh/id_ed25519` cannot delete a sensitive file.
+
+## 0.7.1 - 2026-04-17
+
+### Security
+- **External security audit closed.** 1 HIGH, 2 MEDIUM, and 1 LOW finding fixed. Threat model: a compromised third-party AI CLI with write access to `~/.claude/projects/` dropping malicious session JSONL.
+- **Prototype pollution blocked.** Breakdown maps in `parser.ts` (model, tool, MCP, bash) now use `Object.create(null)` so attacker-controlled keys like `__proto__` create own properties instead of mutating `Object.prototype`. Credit: @lfl1337 (PR #67).
+- **Bounded session-file reads.** New `src/fs-utils.ts` helper caps reads at 128 MB and switches to stream-based parsing above 8 MB. Applied to 13 reachable read sites across parser, Codex, Copilot, Pi, context-budget, and optimize. Credit: @lfl1337 (PR #67).
+- **Menubar label sanitizer.** SwiftBar directive-separator (`|`) and ANSI escape injection via crafted model or category names is now prevented by an allowlist (`[A-Za-z0-9 ._/-]`) plus 14-character truncation. Credit: @lfl1337 (PR #67).
+
+### Added
+- **`--verbose` flag.** Global CLI option that prints warnings to stderr on skipped (oversize) or failed session-file reads. Silent by default. Credit: @lfl1337 (PR #67).
+- **11 new security tests.** `tests/security/prototype-pollution.test.ts`, `tests/security/menubar-injection.test.ts`, `tests/fs-utils.test.ts`. Total suite: 209 tests.
+
+## 0.7.0 - 2026-04-16
+
+### Added
+- **`codeburn optimize` command.** Scans your sessions and your `~/.claude/`
+  setup for 11 common waste patterns and hands back exact copy-paste fixes.
+  Detection-only, never writes to user files. Supports `--period` (today,
+  week, 30days, month, all) and `--provider` (all, claude, codex, cursor).
+- **Setup health grade (A-F).** Urgency-weighted rollup of all findings, with
+  impact scored against observed waste so the most expensive issues rank
+  first. High findings penalise more, medium less, low least.
+- **Trend tracking.** Repeat runs classify each finding as new, improving,
+  or resolved against a 48-hour recent window, so fixed issues disappear
+  instead of lingering as noise.
+- **11 detectors:** files Claude re-reads across sessions, low Read:Edit
+  ratio, projects missing `.claudeignore`, uncapped `BASH_MAX_OUTPUT_LENGTH`,
+  unused MCP servers, ghost agents, ghost skills, ghost slash commands,
+  bloated `CLAUDE.md` files (with `@-import` expansion counted), cache
+  creation overhead, and junk directory reads.
+- **Copy-paste fixes.** Each finding comes with a ready-to-paste remedy: a
+  `CLAUDE.md` line, a `.claudeignore` template, an environment variable, or
+  a `mv` command to archive unused items.
+- **In-TUI optimize view.** Press `o` in the dashboard when the status bar
+  shows a finding count, `b` to return. Same engine as the standalone
+  command, scoped to the current period and provider.
+- **Per-project context budget column.** By Project panel now shows the
+  estimated per-session context overhead for each project (system prompt +
+  tools + `CLAUDE.md` + skills).
+- **34 filesystem-mocking tests.** Tmpdir fixtures with `os.homedir` mocked
+  via `vi.mock` cover the detector surface end to end. Total suite: 198
+  tests across 13 files.
+
+### Performance
+- **mtime pre-filter + parallel reads + 60s result cache** cut a cold scan
+  from 12-17s to 6-7s on a 10k-session history.
+
+## 0.6.1 - 2026-04-16
+
+### Added
+- **JSON output on `report`, `today`, `month`.** `--format json` writes the
+  full dashboard (overview, daily, projects, models, activities, tools, MCP
+  servers, shell commands, top sessions) to stdout. Contributed by @mallek.
+- **Project filters.** `--project <name>` and `--exclude <name>` on all
+  commands (`report`, `today`, `month`, `status`, `export`). Case-insensitive
+  substring match against project name and path. Both flags are repeatable.
+  Contributed by @mallek.
+- **claude-opus-4-7 model mapping and pricing.** Displays as `Opus 4.7` with
+  the same Opus pricing as 4.6 and a 6x fast multiplier. Contributed by @mallek.
+- **Unit tests for `filterProjectsByName`** covering include/exclude
+  semantics, case-insensitivity, path matching, and input immutability.
+
+### Fixed
+- **Top Sessions panel truncating the calls column.** Row width filled the
+  full panel width without leaving room for the border and padding, so Ink
+  truncated the last 4 characters -- landing exactly on the calls column and
+  producing rows like `$182.58 ...` with no value.
+- **SwiftBar custom plugin directory** now honoured when installing the
+  menubar widget. Reads the configured path from SwiftBar's defaults before
+  falling back to the standard location. Contributed by @Galeas.
+- **`status --format menubar` per-provider today totals** now respect
+  `--project`/`--exclude`. The main period blocks already did, the provider
+  breakdown loop was the one spot that bypassed the filter.
+
 ## 0.6.0 - 2026-04-16
 
 ### Added

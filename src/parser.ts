@@ -1,5 +1,6 @@
-import { readdir, readFile } from 'fs/promises'
+import { readdir, stat } from 'fs/promises'
 import { basename, join } from 'path'
+import { readSessionFile } from './fs-utils.js'
 import { calculateCost, getShortModelName } from './models.js'
 import { discoverAllSessions, getProvider } from './providers/index.js'
 import type { ParsedProviderCall } from './providers/types.js'
@@ -168,11 +169,11 @@ function buildSessionSummary(
   project: string,
   turns: ClassifiedTurn[],
 ): SessionSummary {
-  const modelBreakdown: SessionSummary['modelBreakdown'] = {}
-  const toolBreakdown: SessionSummary['toolBreakdown'] = {}
-  const mcpBreakdown: SessionSummary['mcpBreakdown'] = {}
-  const bashBreakdown: SessionSummary['bashBreakdown'] = {}
-  const categoryBreakdown: SessionSummary['categoryBreakdown'] = {} as SessionSummary['categoryBreakdown']
+  const modelBreakdown: SessionSummary['modelBreakdown'] = Object.create(null)
+  const toolBreakdown: SessionSummary['toolBreakdown'] = Object.create(null)
+  const mcpBreakdown: SessionSummary['mcpBreakdown'] = Object.create(null)
+  const bashBreakdown: SessionSummary['bashBreakdown'] = Object.create(null)
+  const categoryBreakdown: SessionSummary['categoryBreakdown'] = Object.create(null)
 
   let totalCost = 0
   let totalInput = 0
@@ -265,12 +266,17 @@ async function parseSessionFile(
   seenMsgIds: Set<string>,
   dateRange?: DateRange,
 ): Promise<SessionSummary | null> {
-  let content: string
-  try {
-    content = await readFile(filePath, 'utf-8')
-  } catch {
-    return null
+  // Skip files whose mtime is older than the range start. A session file
+  // can only contain entries up to its last-modified time; if that predates
+  // the requested range, nothing in this file can match.
+  if (dateRange) {
+    try {
+      const s = await stat(filePath)
+      if (s.mtimeMs < dateRange.start.getTime()) return null
+    } catch { /* fall through to normal read; missing stat shouldn't break parsing */ }
   }
+  const content = await readSessionFile(filePath)
+  if (content === null) return null
   const lines = content.split('\n').filter(l => l.trim())
   const entries: JournalEntry[] = []
 
@@ -391,6 +397,12 @@ async function parseProviderSources(
   const sessionMap = new Map<string, { project: string; turns: ClassifiedTurn[] }>()
 
   for (const source of sources) {
+    if (dateRange) {
+      try {
+        const s = await stat(source.path)
+        if (s.mtimeMs < dateRange.start.getTime()) continue
+      } catch { /* fall through; treat unknown stat as "may contain data" */ }
+    }
     const parser = provider.createSessionParser(
       { path: source.path, project: source.project, provider: providerName },
       seenKeys,
@@ -460,6 +472,31 @@ function cachePut(key: string, data: ProjectSummary[]) {
     if (oldest) sessionCache.delete(oldest[0])
   }
   sessionCache.set(key, { data, ts: now })
+}
+
+export function filterProjectsByName(
+  projects: ProjectSummary[],
+  include?: string[],
+  exclude?: string[],
+): ProjectSummary[] {
+  let result = projects
+  if (include && include.length > 0) {
+    const patterns = include.map(s => s.toLowerCase())
+    result = result.filter(p => {
+      const name = p.project.toLowerCase()
+      const path = p.projectPath.toLowerCase()
+      return patterns.some(pat => name.includes(pat) || path.includes(pat))
+    })
+  }
+  if (exclude && exclude.length > 0) {
+    const patterns = exclude.map(s => s.toLowerCase())
+    result = result.filter(p => {
+      const name = p.project.toLowerCase()
+      const path = p.projectPath.toLowerCase()
+      return !patterns.some(pat => name.includes(pat) || path.includes(pat))
+    })
+  }
+  return result
 }
 
 export async function parseAllSessions(dateRange?: DateRange, providerFilter?: string): Promise<ProjectSummary[]> {

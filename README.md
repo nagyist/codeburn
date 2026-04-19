@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/AgentSeal/codeburn@main/assets/logo.png" alt="CodeBurn" width="120" />
+  <img src="https://cdn.jsdelivr.net/gh/getagentseal/codeburn@main/assets/logo.png" alt="CodeBurn" width="120" />
 </p>
 
 <h1 align="center">CodeBurn</h1>
@@ -11,15 +11,15 @@
   <a href="https://www.npmjs.com/package/codeburn"><img src="https://img.shields.io/npm/dt/codeburn.svg" alt="total downloads" /></a>
   <a href="https://www.npmjs.com/package/codeburn"><img src="https://img.shields.io/npm/dm/codeburn.svg" alt="monthly downloads" /></a>
   <a href="https://bundlephobia.com/package/codeburn"><img src="https://img.shields.io/bundlephobia/min/codeburn" alt="install size" /></a>
-  <a href="https://github.com/agentseal/codeburn/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/codeburn.svg" alt="license" /></a>
-  <a href="https://github.com/agentseal/codeburn"><img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg" alt="node version" /></a>
+  <a href="https://github.com/getagentseal/codeburn/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/codeburn.svg" alt="license" /></a>
+  <a href="https://github.com/getagentseal/codeburn"><img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg" alt="node version" /></a>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/AgentSeal/codeburn/main/assets/dashboard.jpg" alt="CodeBurn TUI dashboard" width="620" />
+  <img src="https://raw.githubusercontent.com/getagentseal/codeburn/main/assets/dashboard.jpg" alt="CodeBurn TUI dashboard" width="620" />
 </p>
 
-By task type, tool, model, MCP server, and project. Supports **Claude Code**, **Codex** (OpenAI), **Cursor**, **OpenCode**, **Pi**, **[OMP](https://github.com/can1357/oh-my-pi)** (Oh My Pi), and **GitHub Copilot** with a provider plugin system. Tracks one-shot success rate per activity type so you can see where the AI nails it first try vs. burns tokens on edit/test/fix retries. Interactive TUI dashboard with gradient charts, responsive panels, and keyboard navigation. macOS menu bar widget via SwiftBar. CSV/JSON export.
+By task type, tool, model, MCP server, and project. Supports **Claude Code**, **Codex** (OpenAI), **Cursor**, **OpenCode**, **Pi**, **[OMP](https://github.com/can1357/oh-my-pi)** (Oh My Pi), and **GitHub Copilot** with a provider plugin system. Tracks one-shot success rate per activity type so you can see where the AI nails it first try vs. burns tokens on edit/test/fix retries. Interactive TUI dashboard with gradient charts, responsive panels, and keyboard navigation. Native macOS menubar app in `mac/`. CSV/JSON export.
 
 Works by reading session data directly from disk. No wrapper, no proxy, no API keys. Pricing from LiteLLM (auto-cached, all models supported).
 
@@ -44,19 +44,43 @@ npx codeburn
 ## Usage
 
 ```bash
-codeburn                    # interactive dashboard (default: 7 days)
-codeburn today              # today's usage
-codeburn month              # this month's usage
-codeburn report -p 30days   # rolling 30-day window
-codeburn report -p all      # every recorded session
-codeburn report --refresh 60  # auto-refresh every 60 seconds
-codeburn status             # compact one-liner (today + month)
+codeburn                        # interactive dashboard (default: 7 days)
+codeburn today                  # today's usage
+codeburn month                  # this month's usage
+codeburn report -p 30days       # rolling 30-day window
+codeburn report -p all          # every recorded session
+codeburn report --from 2026-04-01 --to 2026-04-10  # exact date range
+codeburn report --format json   # full dashboard data as JSON
+codeburn report --refresh 60    # auto-refresh every 60 seconds
+codeburn status                 # compact one-liner (today + month)
 codeburn status --format json
-codeburn export             # CSV with today, 7 days, 30 days
-codeburn export -f json     # JSON export
+codeburn export                 # CSV with today, 7 days, 30 days
+codeburn export -f json         # JSON export
+codeburn optimize               # find waste, get copy-paste fixes
+codeburn optimize -p week       # scope the scan to last 7 days
 ```
 
 Arrow keys switch between Today / 7 Days / 30 Days / Month / All Time. Press `q` to quit, `1` `2` `3` `4` `5` as shortcuts. The dashboard also shows average cost per session and the five most expensive sessions across all projects.
+
+### JSON output
+
+`report`, `today`, and `month` support `--format json` to output the full dashboard data as structured JSON to stdout:
+
+```bash
+codeburn report --format json             # 7-day JSON report
+codeburn today --format json              # today's data as JSON
+codeburn month --format json              # this month as JSON
+codeburn report -p 30days --format json   # 30-day window
+```
+
+The JSON includes all dashboard panels: overview (cost, calls, sessions, cache hit %), daily breakdown, projects (with `avgCostPerSession`), models with token counts, activities with one-shot rates, core tools, MCP servers, and shell commands. Pipe to `jq` for filtering:
+
+```bash
+codeburn report --format json | jq '.projects'
+codeburn today --format json | jq '.overview.cost'
+```
+
+For the lighter `status --format json` (today + month totals only) or file-based exports (`export -f json`), see above.
 
 ## Providers
 
@@ -76,6 +100,33 @@ codeburn export --provider claude    # export Claude data only
 ```
 
 The `--provider` flag works on all commands: `report`, `today`, `month`, `status`, `export`.
+
+### Project filtering
+
+Filter results by project name (case-insensitive substring match). Both flags are repeatable:
+
+```bash
+codeburn report --project myapp                  # show only projects matching "myapp"
+codeburn report --exclude myapp                  # show everything except "myapp"
+codeburn report --exclude myapp --exclude tests  # exclude multiple projects
+codeburn month --project api --project web       # include multiple projects
+codeburn export --project inventory              # export only "inventory" project data
+```
+
+The `--project` and `--exclude` flags work on all commands and can be combined with `--provider`.
+
+### Date range filtering
+
+Beyond the preset periods, specify an exact window with `--from` and `--to` (`YYYY-MM-DD`, local time):
+
+```bash
+codeburn report --from 2026-04-01 --to 2026-04-10   # explicit window
+codeburn report --from 2026-04-01                    # this date through today
+codeburn report --to 2026-04-10                      # earliest data through this date
+codeburn report --from 2026-04-01 --to 2026-04-10 --format json
+```
+
+Either flag alone is valid. Inverted or malformed dates exit with a clear error. In the TUI, the custom range sets the initial load only -- pressing `1`-`5` switches back to predefined periods.
 
 ### Supported providers
 
@@ -137,14 +188,13 @@ The menu bar widget includes a currency picker with 17 common currencies. For an
 
 ## Menu Bar
 
-<img src="https://cdn.jsdelivr.net/gh/AgentSeal/codeburn@main/assets/menubar.png" alt="CodeBurn SwiftBar menu bar widget" width="260" />
+<img src="https://cdn.jsdelivr.net/gh/getagentseal/codeburn@main/assets/menubar-0.7.2.png" alt="CodeBurn macOS menubar app" width="420" />
 
 ```bash
-codeburn install-menubar    # install SwiftBar/xbar plugin
-codeburn uninstall-menubar  # remove it
+npx codeburn menubar
 ```
 
-Requires [SwiftBar](https://github.com/swiftbar/SwiftBar) (`brew install --cask swiftbar`). Shows today's cost in the menu bar with a flame icon. Dropdown shows activity breakdown, model costs, token stats, per-provider cost breakdown, and a currency picker. Refreshes every 5 minutes.
+One command: downloads the latest `.app`, installs into `~/Applications`, and launches it. Re-run with `--force` to reinstall. Native Swift + SwiftUI app lives in `mac/` (see `mac/README.md` for build details). Shows today's cost with a flame icon, opens a popover with agent tabs, period switcher (Today / 7 Days / 30 Days / Month / All), Trend / Forecast / Pulse / Stats / Plan insights, activity and model breakdowns, optimize findings, and CSV/JSON export. Refreshes live via FSEvents plus a 60-second poll.
 
 ## What it tracks
 
@@ -189,6 +239,35 @@ CodeBurn surfaces the data, you read the story. A few patterns worth knowing:
 
 These are starting points, not verdicts. A 60% cache hit on a single experimental session is fine. A persistent 60% cache hit across weeks of work is a config issue.
 
+## Optimize
+
+Once you know what to look for, `codeburn optimize` scans your sessions and your `~/.claude/` setup for the most common waste patterns and hands back exact, copy-paste fixes. It never writes to your files.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/getagentseal/codeburn/main/assets/optimize.jpg" alt="CodeBurn optimize output" width="720" />
+</p>
+
+```bash
+codeburn optimize                       # scan the last 30 days
+codeburn optimize -p today              # today only
+codeburn optimize -p week               # last 7 days
+codeburn optimize --provider claude     # restrict to one provider
+```
+
+**What it detects**
+
+- Files Claude re-reads across sessions (same content, same context, over and over)
+- Low Read:Edit ratio (editing without reading leads to retries and wasted tokens)
+- Wasted bash output (uncapped `BASH_MAX_OUTPUT_LENGTH`, trailing noise)
+- Unused MCP servers still paying their tool-schema overhead every session
+- Ghost agents, skills, and slash commands defined in `~/.claude/` but never invoked
+- Bloated `CLAUDE.md` files (with `@-import` expansion counted)
+- Cache creation overhead and junk directory reads
+
+Each finding shows the estimated token and dollar savings plus a ready-to-paste fix: a `CLAUDE.md` line, an environment variable, or a `mv` command to archive unused items. Findings are ranked by urgency (impact weighted against observed waste) and rolled up into an A-F setup health grade. Repeat runs classify each finding as new, improving, or resolved against a 48-hour recent window.
+
+You can also open it inline from the dashboard: press `o` when a finding count appears in the status bar, `b` to return.
+
 ## How it reads data
 
 **Claude Code** stores session transcripts as JSONL at `~/.claude/projects/<sanitized-path>/<session-id>.jsonl`. Each assistant entry contains model name, token usage (input, output, cache read, cache write), tool_use blocks, and timestamps.
@@ -221,7 +300,7 @@ src/
   classifier.ts   13-category task classifier
   types.ts        Type definitions
   format.ts       Text rendering (status bar)
-  menubar.ts      SwiftBar plugin generator
+  menubar-json.ts Payload builder consumed by the native macOS menubar app in mac/
   export.ts       CSV/JSON multi-period export
   config.ts       Config file management (~/.config/codeburn/)
   currency.ts     Currency conversion, exchange rates, Intl formatting
