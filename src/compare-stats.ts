@@ -186,63 +186,64 @@ async function collectJsonlFiles(sessionDir: string): Promise<string[]> {
   return files
 }
 
-export async function scanSelfCorrections(sessionDirs: string[]): Promise<Map<string, number>> {
+export async function scanSelfCorrections(projectDirs: string[]): Promise<Map<string, number>> {
   const counts = new Map<string, number>()
 
-  for (const dir of sessionDirs) {
-    let sessionEntries
+  for (const dir of projectDirs) {
+    let entries
     try {
-      sessionEntries = await readdir(dir, { withFileTypes: true })
+      entries = await readdir(dir, { withFileTypes: true })
     } catch {
       continue
     }
 
-    for (const entry of sessionEntries) {
-      if (!entry.isDirectory()) continue
-      const sessionDir = join(dir, entry.name)
+    const allFiles: string[] = []
 
-      let files: string[]
+    for (const entry of entries) {
+      if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+        allFiles.push(join(dir, entry.name))
+      } else if (entry.isDirectory()) {
+        try {
+          const sessionFiles = await collectJsonlFiles(join(dir, entry.name))
+          allFiles.push(...sessionFiles)
+        } catch {
+          continue
+        }
+      }
+    }
+
+    for (const file of allFiles) {
+      let raw: string
       try {
-        files = await collectJsonlFiles(sessionDir)
+        raw = await readFile(file, 'utf8')
       } catch {
         continue
       }
 
-      for (const file of files) {
-        let raw: string
+      for (const line of raw.split('\n')) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+
+        let parsed: unknown
         try {
-          raw = await readFile(file, 'utf8')
+          parsed = JSON.parse(trimmed)
         } catch {
           continue
         }
 
-        for (const line of raw.split('\n')) {
-          const trimmed = line.trim()
-          if (!trimmed) continue
+        const rec = parsed as Record<string, unknown>
+        if (!rec || typeof rec !== 'object' || rec['type'] !== 'assistant') continue
 
-          let parsed: unknown
-          try {
-            parsed = JSON.parse(trimmed)
-          } catch {
-            continue
-          }
+        const msg = rec['message']
+        if (msg === null || typeof msg !== 'object') continue
 
-          if (
-            parsed === null ||
-            typeof parsed !== 'object' ||
-            (parsed as Record<string, unknown>)['type'] !== 'assistant'
-          ) continue
+        const msgRec = msg as Record<string, unknown>
+        const model = msgRec['model']
+        if (typeof model !== 'string' || model === '<synthetic>') continue
 
-          const msg = (parsed as Record<string, unknown>)['message']
-          if (msg === null || typeof msg !== 'object') continue
-
-          const model = (msg as Record<string, unknown>)['model']
-          if (typeof model !== 'string' || model === '<synthetic>') continue
-
-          const text = extractText((msg as Record<string, unknown>)['content'])
-          if (SELF_CORRECTION_PATTERNS.some(p => p.test(text))) {
-            counts.set(model, (counts.get(model) ?? 0) + 1)
-          }
+        const text = extractText(msgRec['content'])
+        if (SELF_CORRECTION_PATTERNS.some(p => p.test(text))) {
+          counts.set(model, (counts.get(model) ?? 0) + 1)
         }
       }
     }

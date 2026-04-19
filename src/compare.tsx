@@ -15,7 +15,7 @@ const GOLD = '#FFD700'
 const LOW_DATA_THRESHOLD = 20
 const LABEL_WIDTH = 20
 const VALUE_WIDTH = 14
-const WINNER_WIDTH = 12
+const WINNER_WIDTH = 16
 const MODEL_NAME_COL = 24
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
@@ -145,50 +145,52 @@ function ComparisonResults({ modelA, modelB, rows, onBack }: ComparisonResultsPr
 
   return (
     <Box flexDirection="column" paddingX={2} paddingY={1}>
-      <Text>
-        <Text bold color={ORANGE}>{modelA.model}</Text>
-        <Text dimColor>  vs  </Text>
-        <Text bold color={ORANGE}>{modelB.model}</Text>
-      </Text>
-      <Text> </Text>
-      <Text>
-        <Text>{''.padEnd(LABEL_WIDTH)}</Text>
-        <Text bold>{nameA.padStart(VALUE_WIDTH)}</Text>
-        <Text bold>{nameB.padStart(VALUE_WIDTH)}</Text>
-      </Text>
-      {rows.map(row => {
-        const fmtA = formatValue(row.valueA, row.formatFn)
-        const fmtB = formatValue(row.valueB, row.formatFn)
-        const winnerLabel = row.winner === 'a' ? `${nameA} wins`
-          : row.winner === 'b' ? `${nameB} wins`
-          : row.winner === 'tie' ? 'tie' : ''
-
-        return (
-          <Text key={row.label}>
-            <Text dimColor>{row.label.padEnd(LABEL_WIDTH)}</Text>
-            <Text color={row.winner === 'a' ? GREEN : undefined}>{fmtA.padStart(VALUE_WIDTH)}</Text>
-            <Text color={row.winner === 'b' ? GREEN : undefined}>{fmtB.padStart(VALUE_WIDTH)}</Text>
-            <Text color={DIM}>{winnerLabel.padStart(WINNER_WIDTH)}</Text>
-          </Text>
-        )
-      })}
-      <Text> </Text>
-      <Text dimColor>{'-- Context '.padEnd(LABEL_WIDTH + VALUE_WIDTH * 2 + WINNER_WIDTH, '-')}</Text>
-      {contextRows.map(row => (
-        <Text key={row.label}>
-          <Text color={DIM}>{row.label.padEnd(LABEL_WIDTH)}</Text>
-          <Text color={DIM}>{row.valueA.padStart(VALUE_WIDTH)}</Text>
-          <Text color={DIM}>{row.valueB.padStart(VALUE_WIDTH)}</Text>
+      <Box flexDirection="column" borderStyle="round" borderColor={ORANGE} paddingX={1}>
+        <Text>
+          <Text bold color={ORANGE}>{modelA.model}</Text>
+          <Text dimColor>  vs  </Text>
+          <Text bold color={ORANGE}>{modelB.model}</Text>
         </Text>
-      ))}
-      {(lowDataA || lowDataB) && (
-        <>
-          <Text> </Text>
-          <Text color={GOLD}>
-            Note: {[lowDataA && modelA.model, lowDataB && modelB.model].filter(Boolean).join(' and ')} ha{lowDataA && lowDataB ? 've' : 's'} fewer than {LOW_DATA_THRESHOLD} calls -- results may not be representative.
+        <Text> </Text>
+        <Text>
+          <Text>{''.padEnd(LABEL_WIDTH)}</Text>
+          <Text bold>{nameA.padStart(VALUE_WIDTH)}</Text>
+          <Text bold>{nameB.padStart(VALUE_WIDTH)}</Text>
+        </Text>
+        {rows.map(row => {
+          const fmtA = formatValue(row.valueA, row.formatFn)
+          const fmtB = formatValue(row.valueB, row.formatFn)
+          const winnerLabel = row.winner === 'a' ? `${nameA} wins`
+            : row.winner === 'b' ? `${nameB} wins`
+            : row.winner === 'tie' ? 'tie' : ''
+
+          return (
+            <Text key={row.label}>
+              <Text dimColor>{row.label.padEnd(LABEL_WIDTH)}</Text>
+              <Text color={row.winner === 'a' ? GREEN : undefined}>{fmtA.padStart(VALUE_WIDTH)}</Text>
+              <Text color={row.winner === 'b' ? GREEN : undefined}>{fmtB.padStart(VALUE_WIDTH)}</Text>
+              <Text color={DIM}>{'  '}{winnerLabel.padEnd(WINNER_WIDTH)}</Text>
+            </Text>
+          )
+        })}
+        <Text> </Text>
+        <Text dimColor>{'-- Context '.padEnd(LABEL_WIDTH + VALUE_WIDTH * 2 + WINNER_WIDTH, '-')}</Text>
+        {contextRows.map(row => (
+          <Text key={row.label}>
+            <Text color={DIM}>{row.label.padEnd(LABEL_WIDTH)}</Text>
+            <Text color={DIM}>{row.valueA.padStart(VALUE_WIDTH)}</Text>
+            <Text color={DIM}>{row.valueB.padStart(VALUE_WIDTH)}</Text>
           </Text>
-        </>
-      )}
+        ))}
+        {(lowDataA || lowDataB) && (
+          <>
+            <Text> </Text>
+            <Text color={GOLD}>
+              Note: {[lowDataA && modelA.model, lowDataB && modelB.model].filter(Boolean).join(' and ')} ha{lowDataA && lowDataB ? 've' : 's'} fewer than {LOW_DATA_THRESHOLD} calls -- results may not be representative.
+            </Text>
+          </>
+        )}
+      </Box>
       <Text> </Text>
       <Text>
         <Text color={ORANGE} bold>[esc]</Text><Text dimColor> back  </Text>
