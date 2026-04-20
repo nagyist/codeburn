@@ -44,8 +44,42 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 function isManifestEntry(value: unknown): value is { file: string; provider: string; logicalPath: string } {
   return isPlainObject(value)
     && typeof value.file === 'string'
+    && /^[a-f0-9]{40}\.json$/.test(value.file)
     && typeof value.provider === 'string'
     && typeof value.logicalPath === 'string'
+}
+
+function isSessionSummary(value: unknown): value is SessionSummary {
+  return isPlainObject(value)
+    && typeof value.sessionId === 'string'
+    && typeof value.project === 'string'
+    && typeof value.firstTimestamp === 'string'
+    && typeof value.lastTimestamp === 'string'
+    && typeof value.totalCostUSD === 'number'
+    && Number.isFinite(value.totalCostUSD)
+    && typeof value.totalInputTokens === 'number'
+    && Number.isFinite(value.totalInputTokens)
+    && typeof value.totalOutputTokens === 'number'
+    && Number.isFinite(value.totalOutputTokens)
+    && typeof value.totalCacheReadTokens === 'number'
+    && Number.isFinite(value.totalCacheReadTokens)
+    && typeof value.totalCacheWriteTokens === 'number'
+    && Number.isFinite(value.totalCacheWriteTokens)
+    && typeof value.apiCalls === 'number'
+    && Number.isFinite(value.apiCalls)
+    && Array.isArray(value.turns)
+    && isPlainObject(value.modelBreakdown)
+    && isPlainObject(value.toolBreakdown)
+    && isPlainObject(value.mcpBreakdown)
+    && isPlainObject(value.bashBreakdown)
+    && isPlainObject(value.categoryBreakdown)
+}
+
+function isAppendState(value: unknown): value is AppendState {
+  return isPlainObject(value)
+    && typeof value.endOffset === 'number'
+    && Number.isFinite(value.endOffset)
+    && typeof value.tailHash === 'string'
 }
 
 function isSourceCacheEntry(value: unknown): value is SourceCacheEntry {
@@ -57,9 +91,13 @@ function isSourceCacheEntry(value: unknown): value is SourceCacheEntry {
     && (value.cacheStrategy === 'full-reparse' || value.cacheStrategy === 'append-jsonl')
     && typeof value.parserVersion === 'string'
     && isPlainObject(value.fingerprint)
+    && Number.isFinite(value.fingerprint.mtimeMs)
     && typeof value.fingerprint.mtimeMs === 'number'
+    && Number.isFinite(value.fingerprint.sizeBytes)
     && typeof value.fingerprint.sizeBytes === 'number'
     && Array.isArray(value.sessions)
+    && value.sessions.every(isSessionSummary)
+    && (value.appendState === undefined || isAppendState(value.appendState))
 }
 
 function cacheRoot(): string {
@@ -172,10 +210,10 @@ export async function readSourceCacheEntry(
 export async function writeSourceCacheEntry(manifest: SourceCacheManifest, entry: SourceCacheEntry): Promise<void> {
   await mkdir(entryDir(), { recursive: true })
   const file = entryFilename(entry.provider, entry.logicalPath)
+  await atomicWriteJson(join(entryDir(), file), entry)
   manifest.entries[sourceKey(entry.provider, entry.logicalPath)] = {
     file,
     provider: entry.provider,
     logicalPath: entry.logicalPath,
   }
-  await atomicWriteJson(join(entryDir(), file), entry)
 }

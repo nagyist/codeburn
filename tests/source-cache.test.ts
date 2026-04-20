@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { createHash } from 'crypto'
 import { existsSync } from 'fs'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
@@ -37,6 +38,22 @@ describe('source cache manifest', () => {
     await writeFile(join(root, 'source-cache-v1', 'manifest.json'), JSON.stringify({
       version: SOURCE_CACHE_VERSION,
       entries: { bad: { file: 123, provider: 'fake' } },
+    }), 'utf-8')
+
+    await expect(loadSourceCacheManifest()).resolves.toEqual(emptySourceCacheManifest())
+  })
+
+  it('returns an empty manifest when an entry filename is unsafe', async () => {
+    await mkdir(join(root, 'source-cache-v1'), { recursive: true })
+    await writeFile(join(root, 'source-cache-v1', 'manifest.json'), JSON.stringify({
+      version: SOURCE_CACHE_VERSION,
+      entries: {
+        bad: {
+          file: '../escape.json',
+          provider: 'fake',
+          logicalPath: join(root, 'source.jsonl'),
+        },
+      },
     }), 'utf-8')
 
     await expect(loadSourceCacheManifest()).resolves.toEqual(emptySourceCacheManifest())
@@ -113,6 +130,30 @@ describe('source cache manifest', () => {
     expect(loaded).toBeNull()
   })
 
+  it('returns null when append state is malformed', async () => {
+    const sourcePath = join(root, 'source.jsonl')
+    await writeFile(sourcePath, 'one\n', 'utf-8')
+    const fingerprint = await computeFileFingerprint(sourcePath)
+    const entry = {
+      version: SOURCE_CACHE_VERSION,
+      provider: 'fake',
+      logicalPath: sourcePath,
+      fingerprintPath: sourcePath,
+      cacheStrategy: 'append-jsonl' as const,
+      parserVersion: 'fake-v1',
+      fingerprint,
+      sessions: [],
+      appendState: { endOffset: 'bad', tailHash: 'abc' },
+    }
+
+    const manifest = await loadSourceCacheManifest()
+    await writeSourceCacheEntry(manifest, entry as SourceCacheEntry)
+    await saveSourceCacheManifest(manifest)
+
+    const loaded = await readSourceCacheEntry(await loadSourceCacheManifest(), 'fake', sourcePath)
+    expect(loaded).toBeNull()
+  })
+
   it('writes atomically without leaving temp files behind', async () => {
     const sourcePath = join(root, 'source.jsonl')
     await writeFile(sourcePath, 'x\n', 'utf-8')
@@ -136,5 +177,28 @@ describe('source cache manifest', () => {
     const entryFiles = await readdir(join(root, 'source-cache-v1', 'entries'))
     expect(cacheFiles.some(f => f.endsWith('.tmp'))).toBe(false)
     expect(entryFiles.some(f => f.endsWith('.tmp'))).toBe(false)
+  })
+
+  it('does not mutate the manifest when the entry write fails', async () => {
+    const sourcePath = join(root, 'source.jsonl')
+    await writeFile(sourcePath, 'x\n', 'utf-8')
+    const manifest = await loadSourceCacheManifest()
+    const provider = 'fake'
+    const logicalPath = sourcePath
+    const file = `${createHash('sha1').update(`${provider}:${logicalPath}`).digest('hex')}.json`
+    await mkdir(join(root, 'source-cache-v1', 'entries', file), { recursive: true })
+
+    await expect(writeSourceCacheEntry(manifest, {
+      version: SOURCE_CACHE_VERSION,
+      provider,
+      logicalPath,
+      fingerprintPath: sourcePath,
+      cacheStrategy: 'full-reparse',
+      parserVersion: 'fake-v1',
+      fingerprint: await computeFileFingerprint(sourcePath),
+      sessions: [],
+    })).rejects.toBeTruthy()
+
+    expect(manifest.entries[`fake:${sourcePath}`]).toBeUndefined()
   })
 })
