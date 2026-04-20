@@ -37,6 +37,31 @@ export type SourceCacheManifest = {
   entries: Record<string, { file: string; provider: string; logicalPath: string }>
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isManifestEntry(value: unknown): value is { file: string; provider: string; logicalPath: string } {
+  return isPlainObject(value)
+    && typeof value.file === 'string'
+    && typeof value.provider === 'string'
+    && typeof value.logicalPath === 'string'
+}
+
+function isSourceCacheEntry(value: unknown): value is SourceCacheEntry {
+  return isPlainObject(value)
+    && typeof value.version === 'number'
+    && typeof value.provider === 'string'
+    && typeof value.logicalPath === 'string'
+    && typeof value.fingerprintPath === 'string'
+    && (value.cacheStrategy === 'full-reparse' || value.cacheStrategy === 'append-jsonl')
+    && typeof value.parserVersion === 'string'
+    && isPlainObject(value.fingerprint)
+    && typeof value.fingerprint.mtimeMs === 'number'
+    && typeof value.fingerprint.sizeBytes === 'number'
+    && Array.isArray(value.sessions)
+}
+
 function cacheRoot(): string {
   const base = process.env['CODEBURN_CACHE_DIR'] ?? join(homedir(), '.cache', 'codeburn')
   return join(base, 'source-cache-v1')
@@ -72,11 +97,18 @@ export async function loadSourceCacheManifest(): Promise<SourceCacheManifest> {
 
   try {
     const raw = await readFile(manifestPath(), 'utf-8')
-    const parsed = JSON.parse(raw) as Partial<SourceCacheManifest>
-    if (parsed.version !== SOURCE_CACHE_VERSION || !parsed.entries || typeof parsed.entries !== 'object') {
+    const parsed: unknown = JSON.parse(raw)
+    if (!isPlainObject(parsed) || parsed.version !== SOURCE_CACHE_VERSION || !isPlainObject(parsed.entries)) {
       return emptySourceCacheManifest()
     }
-    return { version: SOURCE_CACHE_VERSION, entries: parsed.entries as SourceCacheManifest['entries'] }
+
+    const entries: SourceCacheManifest['entries'] = {}
+    for (const [key, value] of Object.entries(parsed.entries)) {
+      if (!isManifestEntry(value)) return emptySourceCacheManifest()
+      entries[key] = value
+    }
+
+    return { version: SOURCE_CACHE_VERSION, entries }
   } catch {
     return emptySourceCacheManifest()
   }
@@ -120,8 +152,8 @@ export async function readSourceCacheEntry(
 
   try {
     const raw = await readFile(join(entryDir(), meta.file), 'utf-8')
-    const entry = JSON.parse(raw) as SourceCacheEntry
-    if (entry.version !== SOURCE_CACHE_VERSION) return null
+    const entry: unknown = JSON.parse(raw)
+    if (!isSourceCacheEntry(entry) || entry.version !== SOURCE_CACHE_VERSION) return null
 
     const currentFingerprint = await computeFileFingerprint(entry.fingerprintPath)
     if (

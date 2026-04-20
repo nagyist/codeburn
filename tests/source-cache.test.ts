@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { existsSync } from 'fs'
-import { mkdtemp, readFile, rm, writeFile } from 'fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -29,6 +29,16 @@ afterEach(async () => {
 
 describe('source cache manifest', () => {
   it('returns an empty manifest when no file exists', async () => {
+    await expect(loadSourceCacheManifest()).resolves.toEqual(emptySourceCacheManifest())
+  })
+
+  it('returns an empty manifest when the manifest shape is invalid', async () => {
+    await mkdir(join(root, 'source-cache-v1'), { recursive: true })
+    await writeFile(join(root, 'source-cache-v1', 'manifest.json'), JSON.stringify({
+      version: SOURCE_CACHE_VERSION,
+      entries: { bad: { file: 123, provider: 'fake' } },
+    }), 'utf-8')
+
     await expect(loadSourceCacheManifest()).resolves.toEqual(emptySourceCacheManifest())
   })
 
@@ -80,6 +90,29 @@ describe('source cache manifest', () => {
     expect(loaded).toBeNull()
   })
 
+  it('returns null when the cached entry shape is invalid', async () => {
+    const sourcePath = join(root, 'source.jsonl')
+    await writeFile(sourcePath, 'one\n', 'utf-8')
+    const manifest = await loadSourceCacheManifest()
+    const file = 'broken.json'
+    manifest.entries[`fake:${sourcePath}`] = { file, provider: 'fake', logicalPath: sourcePath }
+    await saveSourceCacheManifest(manifest)
+    await mkdir(join(root, 'source-cache-v1', 'entries'), { recursive: true })
+    await writeFile(join(root, 'source-cache-v1', 'entries', file), JSON.stringify({
+      version: SOURCE_CACHE_VERSION,
+      provider: 'fake',
+      logicalPath: sourcePath,
+      fingerprintPath: sourcePath,
+      cacheStrategy: 'full-reparse',
+      parserVersion: 'fake-v1',
+      fingerprint: { mtimeMs: 'nope', sizeBytes: 4 },
+      sessions: [],
+    }), 'utf-8')
+
+    const loaded = await readSourceCacheEntry(await loadSourceCacheManifest(), 'fake', sourcePath)
+    expect(loaded).toBeNull()
+  })
+
   it('writes atomically without leaving temp files behind', async () => {
     const sourcePath = join(root, 'source.jsonl')
     await writeFile(sourcePath, 'x\n', 'utf-8')
@@ -99,5 +132,9 @@ describe('source cache manifest', () => {
     const files = JSON.parse(await readFile(join(root, 'source-cache-v1', 'manifest.json'), 'utf-8'))
     expect(files.version).toBe(SOURCE_CACHE_VERSION)
     expect(existsSync(join(root, 'source-cache-v1', 'entries'))).toBe(true)
+    const cacheFiles = await readdir(join(root, 'source-cache-v1'))
+    const entryFiles = await readdir(join(root, 'source-cache-v1', 'entries'))
+    expect(cacheFiles.some(f => f.endsWith('.tmp'))).toBe(false)
+    expect(entryFiles.some(f => f.endsWith('.tmp'))).toBe(false)
   })
 })
