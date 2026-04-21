@@ -2,6 +2,12 @@ name: firstlook
 on:
   pull_request:
     types: [opened, reopened, synchronize]
+  workflow_dispatch:
+    inputs:
+      pr-number:
+        description: 'PR number to scan (leave empty for all open PRs)'
+        required: false
+        type: string
 
 jobs:
   assess:
@@ -12,5 +18,6 @@ jobs:
     steps:
       - uses: getagentseal/firstlook@main
         with:
+          pr-number: ${{ inputs.pr-number }}
           skip-users: 'dependabot[bot],renovate[bot]'
           fail-on: 'unknown'
