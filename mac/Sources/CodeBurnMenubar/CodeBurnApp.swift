@@ -88,14 +88,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             }
         }
 
-        // Prefetch the remaining periods in a detached task. This used to be awaited inside the
-        // refresh loop, but on large corpora the All Time / Month period can take 60+ seconds to
-        // parse and blocked Today's refresh for that whole window, so the status label drifted
-        // out of sync with the CLI until prefetchAll finally returned.
-        Task { @MainActor [weak self] in
-            guard let s = self else { return }
-            await s.store.prefetchAll()
-        }
+        // Period tabs are fetched lazily when the user first clicks them in the popover.
+        // An earlier version prefetched every period on launch to make tab switching instant,
+        // but on large session corpora that spawned four concurrent codeburn subprocesses
+        // competing with the main refresh loop for disk and parser time, and the status label
+        // drifted stale for minutes. A per-tab first-click cost of a few seconds is the better
+        // tradeoff on user machines that track thousands of sessions.
     }
 
     private func observeStore() {

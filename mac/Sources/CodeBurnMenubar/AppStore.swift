@@ -89,15 +89,6 @@ final class AppStore {
         }
     }
 
-    /// Prefetch all periods so tab switching is instant. Skips any period already cached.
-    func prefetchAll() async {
-        for period in Period.allCases {
-            let key = PayloadCacheKey(period: period, provider: .all)
-            if cache[key] != nil { continue }
-            await refreshQuietly(period: period)
-        }
-    }
-
     /// Background refresh for a period other than the visible one (e.g. keeping today fresh for the menubar badge).
     /// Does not toggle isLoading, so the popover's loading overlay is unaffected.
     /// Always uses the .all provider since the menubar badge shows total spend.
