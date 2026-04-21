@@ -30,10 +30,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let store = AppStore()
     let updateChecker = UpdateChecker()
     private var refreshTask: Task<Void, Never>?
+    /// Held for the lifetime of the app to opt out of App Nap and Automatic Termination.
+    /// Without this the 15s refresh Task gets suspended whenever the user is interacting with
+    /// another app, and the status bar label freezes until they click the menubar icon (which
+    /// calls NSApp.activate and wakes the app back up).
+    private var backgroundActivity: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Menubar accessory -- no Dock icon, no app switcher entry.
         NSApp.setActivationPolicy(.accessory)
+
+        backgroundActivity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiated, .automaticTerminationDisabled, .suddenTerminationDisabled],
+            reason: "CodeBurn menubar polls AI coding cost every 15 seconds while idle in the background."
+        )
 
         restorePersistedCurrency()
         setupStatusItem()
@@ -158,6 +168,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             attributes: [.font: font, .foregroundColor: color]
         ))
         button.attributedTitle = composed
+        // Force immediate redraw. NSStatusItem sometimes defers the status bar paint for an
+        // accessory app that is not foreground, so the label visually freezes until the user
+        // opens the popover (which triggers NSApp.activate + a forced redraw cycle).
+        button.needsDisplay = true
+        button.display()
     }
 
     // MARK: - Popover
