@@ -2,7 +2,6 @@ import { readdir, stat } from 'fs/promises'
 import { basename, join } from 'path'
 import { homedir } from 'os'
 
-import { type DiscoverySnapshotEntry, loadDiscoveryCache, saveDiscoveryCache } from '../discovery-cache.js'
 import { readSessionFile } from '../fs-utils.js'
 import { calculateCost } from '../models.js'
 import { extractBashCommands } from '../bash-utils.js'
@@ -73,31 +72,7 @@ async function readFirstEntry(filePath: string): Promise<PiEntry | null> {
   }
 }
 
-async function collectPiDiscoverySnapshot(sessionsDir: string): Promise<DiscoverySnapshotEntry[]> {
-  const snapshot: DiscoverySnapshotEntry[] = []
-
-  let projectDirs: string[]
-  try {
-    projectDirs = await readdir(sessionsDir)
-  } catch {
-    return snapshot
-  }
-
-  for (const dirName of projectDirs) {
-    const dirPath = join(sessionsDir, dirName)
-    const dirStat = await stat(dirPath).catch(() => null)
-    if (!dirStat?.isDirectory()) continue
-    snapshot.push({ path: dirPath, mtimeMs: dirStat.mtimeMs })
-  }
-
-  return snapshot
-}
-
 async function discoverSessionsInDir(sessionsDir: string, providerName: string): Promise<SessionSource[]> {
-  const snapshot = await collectPiDiscoverySnapshot(sessionsDir)
-  const cached = await loadDiscoveryCache(providerName, sessionsDir, snapshot)
-  if (cached) return cached
-
   const sources: SessionSource[] = []
 
   let projectDirs: string[]
@@ -129,19 +104,10 @@ async function discoverSessionsInDir(sessionsDir: string, providerName: string):
       if (!first || first.type !== 'session') continue
 
       const cwd = first.cwd ?? dirName
-      sources.push({
-        path: filePath,
-        project: basename(cwd),
-        provider: providerName,
-        fingerprintPath: filePath,
-        cacheStrategy: 'append-jsonl',
-        progressLabel: basename(filePath),
-        parserVersion: `${providerName}:v1`,
-      })
+      sources.push({ path: filePath, project: basename(cwd), provider: providerName })
     }
   }
 
-  await saveDiscoveryCache(providerName, sessionsDir, snapshot, sources)
   return sources
 }
 

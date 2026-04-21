@@ -72,12 +72,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func startRefreshLoop() {
         refreshTask = Task { [weak self] in
             guard let s = self else { return }
-            // First cycle: fetch current view, then prefetch all periods in background
+            // First cycle: fetch today so the status icon has a number within seconds of launch.
             await s.store.refreshQuietly(period: .today)
             s.refreshStatusButton()
             await s.store.refresh(includeOptimize: true)
             s.refreshStatusButton()
-            await s.store.prefetchAll()
 
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: refreshIntervalNanos)
@@ -88,6 +87,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 s.refreshStatusButton()
             }
         }
+
+        // Period tabs are fetched lazily when the user first clicks them in the popover.
+        // An earlier version prefetched every period on launch to make tab switching instant,
+        // but on large session corpora that spawned four concurrent codeburn subprocesses
+        // competing with the main refresh loop for disk and parser time, and the status label
+        // drifted stale for minutes. A per-tab first-click cost of a few seconds is the better
+        // tradeoff on user machines that track thousands of sessions.
     }
 
     private func observeStore() {
