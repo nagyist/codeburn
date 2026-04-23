@@ -28,11 +28,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var popover: NSPopover!
     private let store = AppStore()
     let updateChecker = UpdateChecker()
-    private var refreshTask: Task<Void, Never>?
+    private var dispatchTimer: DispatchSourceTimer?
+    private var lastRefreshTime: Date = .distantPast
+    private let maxStaleSeconds: TimeInterval = 30
     /// Held for the lifetime of the app to opt out of App Nap and Automatic Termination.
-    /// Without this the 15s refresh Task gets suspended whenever the user is interacting with
-    /// another app, and the status bar label freezes until they click the menubar icon (which
-    /// calls NSApp.activate and wakes the app back up).
     private var backgroundActivity: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -50,7 +49,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         setupPopover()
         observeStore()
         startRefreshLoop()
+        setupWakeObservers()
         Task { await updateChecker.checkIfNeeded() }
+    }
+
+    private func setupWakeObservers() {
+        let nc = NSWorkspace.shared.notificationCenter
+
+        // Force refresh when system wakes from sleep
+        nc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.forceRefresh()
+        }
+
+        // Force refresh when screen wakes
+        nc.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.forceRefresh()
+        }
+
+        // Force refresh when user session becomes active
+        nc.addObserver(forName: NSWorkspace.sessionDidBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.forceRefresh()
+        }
+
+        // Check staleness when any app activates (means user is back)
+        nc.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.refreshIfStale()
+        }
+    }
+
+    private func forceRefresh() {
+        lastRefreshTime = Date()
+        Task { @MainActor in
+            await store.refreshQuietly(period: .today)
+            refreshStatusButton()
+            await store.refresh(includeOptimize: true)
+            refreshStatusButton()
+        }
+    }
+
+    private func refreshIfStale() {
+        let elapsed = Date().timeIntervalSince(lastRefreshTime)
+        if elapsed > maxStaleSeconds {
+            forceRefresh()
+        }
     }
 
     /// Loads the currency code persisted by `codeburn currency` so a relaunch picks up where
@@ -76,34 +117,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        refreshTask?.cancel()
+        dispatchTimer?.cancel()
     }
 
     private func startRefreshLoop() {
-        refreshTask = Task { [weak self] in
-            guard let s = self else { return }
-            // First cycle: fetch today so the status icon has a number within seconds of launch.
-            await s.store.refreshQuietly(period: .today)
-            s.refreshStatusButton()
-            await s.store.refresh(includeOptimize: true)
-            s.refreshStatusButton()
+        // Initial fetch on launch
+        forceRefresh()
 
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: refreshIntervalNanos)
-                guard let s = self else { return }
-                await s.store.refreshQuietly(period: .today)
-                s.refreshStatusButton()
-                await s.store.refresh(includeOptimize: true)
-                s.refreshStatusButton()
-            }
+        // Use DispatchSourceTimer for background refresh
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + .seconds(Int(refreshIntervalSeconds)), repeating: .seconds(Int(refreshIntervalSeconds)), leeway: .seconds(1))
+        timer.setEventHandler { [weak self] in
+            self?.forceRefresh()
         }
-
-        // Period tabs are fetched lazily when the user first clicks them in the popover.
-        // An earlier version prefetched every period on launch to make tab switching instant,
-        // but on large session corpora that spawned four concurrent codeburn subprocesses
-        // competing with the main refresh loop for disk and parser time, and the status label
-        // drifted stale for minutes. A per-tab first-click cost of a few seconds is the better
-        // tradeoff on user machines that track thousands of sessions.
+        timer.resume()
+        dispatchTimer = timer
     }
 
     private func observeStore() {
@@ -202,6 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         if popover.isShown {
             popover.performClose(sender)
         } else {
+            refreshIfStale()
             NSApp.activate(ignoringOtherApps: true)
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
