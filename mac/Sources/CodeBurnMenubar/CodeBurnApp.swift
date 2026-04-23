@@ -29,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let store = AppStore()
     let updateChecker = UpdateChecker()
     private var dispatchTimer: DispatchSourceTimer?
+    private var signalSource: DispatchSourceSignal?
     private var lastRefreshTime: Date = .distantPast
     private let maxStaleSeconds: TimeInterval = 30
     /// Held for the lifetime of the app to opt out of App Nap and Automatic Termination.
@@ -50,6 +51,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         observeStore()
         startRefreshLoop()
         setupWakeObservers()
+        setupSignalHandler()
+        installLaunchAgentIfNeeded()
         Task { await updateChecker.checkIfNeeded() }
     }
 
@@ -74,6 +77,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // Check staleness when any app activates (means user is back)
         nc.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
             self?.refreshIfStale()
+        }
+    }
+
+    private func setupSignalHandler() {
+        let source = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
+        signal(SIGUSR1, SIG_IGN)
+        source.setEventHandler { [weak self] in
+            NSLog("CodeBurn: received SIGUSR1, forcing refresh")
+            self?.forceRefresh()
+        }
+        source.resume()
+        signalSource = source
+    }
+
+    private func installLaunchAgentIfNeeded() {
+        let fm = FileManager.default
+        let agentName = "com.codeburn.refresh.plist"
+        guard let home = fm.homeDirectoryForCurrentUser.path.removingPercentEncoding else { return }
+        let destDir = "\(home)/Library/LaunchAgents"
+        let destPath = "\(destDir)/\(agentName)"
+
+        if fm.fileExists(atPath: destPath) { return }
+
+        let plist = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>Label</key>
+            <string>com.codeburn.refresh</string>
+            <key>ProgramArguments</key>
+            <array>
+                <string>/bin/sh</string>
+                <string>-c</string>
+                <string>kill -USR1 $(pgrep -x CodeBurnMenubar) 2>/dev/null || true</string>
+            </array>
+            <key>StartInterval</key>
+            <integer>15</integer>
+            <key>RunAtLoad</key>
+            <true/>
+            <key>KeepAlive</key>
+            <false/>
+        </dict>
+        </plist>
+        """
+
+        do {
+            try fm.createDirectory(atPath: destDir, withIntermediateDirectories: true)
+            try plist.write(toFile: destPath, atomically: true, encoding: .utf8)
+            let task = Process()
+            task.launchPath = "/bin/launchctl"
+            task.arguments = ["load", destPath]
+            try task.run()
+            task.waitUntilExit()
+            NSLog("CodeBurn: installed LaunchAgent for reliable refresh")
+        } catch {
+            NSLog("CodeBurn: failed to install LaunchAgent: \(error)")
         }
     }
 
