@@ -32,7 +32,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var backgroundActivity: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        // On macOS Tahoe (26.x), accessory apps may fail to render their status item
+        // if the activation policy is set before the status item is created. Starting
+        // as a regular app and switching to accessory after setup works around this.
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
 
         ProcessInfo.processInfo.automaticTerminationSupportEnabled = false
         ProcessInfo.processInfo.disableSuddenTermination()
@@ -44,6 +48,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         restorePersistedCurrency()
         setupStatusItem()
         setupPopover()
+
+        // Switch to accessory policy after status item is set up to hide from Dock
+        DispatchQueue.main.async {
+            NSApp.setActivationPolicy(.accessory)
+        }
         observeStore()
         startRefreshLoop()
         setupWakeObservers()
@@ -220,10 +229,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: statusItemWidth)
         guard let button = statusItem.button else { return }
+
+        // Set a simple SF Symbol image immediately to ensure the status item renders.
+        // On macOS Tahoe, status items may fail to appear if only an attributed title
+        // is set during initial setup.
+        let flameConfig = NSImage.SymbolConfiguration(pointSize: menubarTitleFontSize, weight: .medium)
+        let flame = NSImage(systemSymbolName: "flame.fill", accessibilityDescription: "CodeBurn")?
+            .withSymbolConfiguration(flameConfig)
+        flame?.isTemplate = true
+        button.image = flame
+        button.imagePosition = .imageLeading
+
         button.target = self
         button.action = #selector(handleButtonClick(_:))
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        refreshStatusButton()
+
+        // Defer the full attributed title setup to ensure initial render completes
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshStatusButton()
+        }
     }
 
     /// Composes the menubar title as a single attributed string with the flame as an inline
