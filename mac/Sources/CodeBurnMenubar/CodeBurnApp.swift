@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Observation
+import ServiceManagement
 
 private let refreshIntervalSeconds: UInt64 = 15
 private let nanosPerSecond: UInt64 = 1_000_000_000
@@ -50,6 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         setupWakeObservers()
         setupDistributedNotificationListener()
         installLaunchAgentIfNeeded()
+        registerLoginItemIfNeeded()
         Task { await updateChecker.checkIfNeeded() }
     }
 
@@ -130,6 +132,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             load.waitUntilExit()
         } catch {
             NSLog("CodeBurn: LaunchAgent setup failed: \(error)")
+        }
+    }
+
+    private func registerLoginItemIfNeeded() {
+        let service = SMAppService.mainApp
+        if service.status == .notRegistered {
+            do {
+                try service.register()
+            } catch {
+                NSLog("CodeBurn: Login item registration failed: \(error)")
+            }
         }
     }
 
