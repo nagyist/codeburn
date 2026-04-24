@@ -160,6 +160,58 @@ function extractUserQuery(userBlock: string): string {
   return combined.slice(0, MAX_USER_TEXT_LENGTH)
 }
 
+function parseJsonlTranscript(raw: string): { turns: ParsedTurn[]; recognized: boolean } {
+  const lines = raw.split(/\r?\n/).filter(l => l.trim())
+  if (lines.length === 0) return { turns: [], recognized: false }
+
+  const turns: ParsedTurn[] = []
+  let currentUserMessage = ''
+
+  for (const line of lines) {
+    let entry: { role?: string; message?: { content?: Array<{ type?: string; text?: string; name?: string }> } }
+    try {
+      entry = JSON.parse(line)
+    } catch {
+      continue
+    }
+
+    if (entry.role === 'user') {
+      const texts = (entry.message?.content ?? [])
+        .filter(c => c.type === 'text')
+        .map(c => c.text ?? '')
+      const combined = texts.join(' ')
+      currentUserMessage = extractUserQuery(combined) || combined.slice(0, MAX_USER_TEXT_LENGTH)
+      continue
+    }
+
+    if (entry.role === 'assistant' && currentUserMessage) {
+      const content = entry.message?.content ?? []
+      const bodyParts: string[] = []
+      const tools: string[] = []
+
+      for (const block of content) {
+        if (block.type === 'text' && block.text) {
+          bodyParts.push(block.text)
+        } else if (block.type === 'tool_use' && block.name) {
+          tools.push(`cursor:${block.name.toLowerCase()}`)
+        }
+      }
+
+      turns.push({
+        userMessage: currentUserMessage,
+        assistant: {
+          body: bodyParts.join('\n').trim(),
+          reasoning: '',
+          tools,
+        },
+      })
+      currentUserMessage = ''
+    }
+  }
+
+  return { turns, recognized: turns.length > 0 }
+}
+
 function parseTranscript(raw: string): { turns: ParsedTurn[]; recognized: boolean } {
   const lines = raw.split(/\r?\n/)
   let recognized = false
@@ -299,7 +351,8 @@ function createParser(
         }
 
         const transcript = await readFile(source.path, 'utf-8')
-        const parsed = parseTranscript(transcript)
+        const isJsonl = source.path.endsWith('.jsonl')
+        const parsed = isJsonl ? parseJsonlTranscript(transcript) : parseTranscript(transcript)
 
         if (!parsed.recognized) {
           process.stderr.write(`codeburn: skipped ${basename(source.path)}: unrecognized cursor-agent transcript format\n`)
@@ -395,15 +448,32 @@ export function createCursorAgentProvider(baseDirOverride?: string): Provider {
 
         const transcriptEntries = await readdir(transcriptDir, { withFileTypes: true })
         for (const transcript of transcriptEntries) {
-          if (!transcript.isFile()) continue
-          if (!transcript.name.endsWith('.txt')) continue
+          // Legacy format: .txt files directly in agent-transcripts/
+          if (transcript.isFile() && transcript.name.endsWith('.txt')) {
+            const transcriptPath = join(transcriptDir, transcript.name)
+            sources.push({
+              path: transcriptPath,
+              project: projectId,
+              provider: 'cursor-agent',
+            })
+            continue
+          }
 
-          const transcriptPath = join(transcriptDir, transcript.name)
-          sources.push({
-            path: transcriptPath,
-            project: projectId,
-            provider: 'cursor-agent',
-          })
+          // Composer 2 format: UUID subdirectories with .jsonl files
+          if (transcript.isDirectory() && UUID_LIKE.test(transcript.name)) {
+            const subdir = join(transcriptDir, transcript.name)
+            const subEntries = await readdir(subdir, { withFileTypes: true }).catch(() => [])
+            for (const sub of subEntries) {
+              if (!sub.isFile()) continue
+              if (!sub.name.endsWith('.jsonl') && !sub.name.endsWith('.txt')) continue
+              const filePath = join(subdir, sub.name)
+              sources.push({
+                path: filePath,
+                project: projectId,
+                provider: 'cursor-agent',
+              })
+            }
+          }
         }
       }
 
