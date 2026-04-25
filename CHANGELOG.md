@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.1 - 2026-04-25
+
+### Added
+- **`codeburn yield` command.** Correlates AI sessions with git history to categorize spend by outcome: **productive** (code shipped to main), **reverted** (commits later undone), or **abandoned** (work that never committed). Shows percentage breakdown so you know not just what you spent, but what happened to it. Accepts `--today`, `--week`, `--month` flags.
+
 ## 0.9.0 - 2026-04-24
 
 ### Added (CLI)
