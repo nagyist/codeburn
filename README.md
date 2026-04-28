@@ -10,6 +10,8 @@
   <a href="https://github.com/getagentseal/codeburn/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/codeburn.svg" alt="license" /></a>
   <a href="https://github.com/getagentseal/codeburn"><img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg" alt="node version" /></a>
   <a href="https://discord.gg/pJ2DMWvtAx"><img src="https://img.shields.io/badge/discord-join-5865F2?logo=discord&logoColor=white" alt="Discord" /></a>
+  <a href="https://github.com/getagentseal/agentseal"><img src="https://img.shields.io/github/stars/getagentseal/agentseal?style=flat&logo=github&label=AgentSeal" alt="AgentSeal stars" /></a>
+  <a href="https://github.com/getagentseal/codeburn"><img src="https://img.shields.io/github/stars/getagentseal/codeburn?style=flat&logo=github&label=CodeBurn" alt="CodeBurn stars" /></a>
 </p>
 
 CodeBurn tracks token usage, cost, and performance across **16 AI coding tools**. It breaks down spending by task type, model, tool, project, and provider so you can see exactly where your budget goes.
