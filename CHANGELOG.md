@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.9.4 - 2026-04-29
+
+### Added (CLI)
+- **OpenClaw provider.** Parses JSONL agent logs from `~/.openclaw/agents/` with legacy path support (`.clawdbot`, `.moltbot`, `.moldbot`). Token usage from assistant message `usage` blocks.
+- **Roo Code provider.** Reads Cline-family `ui_messages.json` from VS Code `globalStorage/rooveterinaryinc.roo-cline/tasks/`.
+- **KiloCode provider.** Reads Cline-family `ui_messages.json` from VS Code `globalStorage/kilocode.kilo-code/tasks/`.
+- **Qwen CLI provider.** Parses JSONL sessions from `~/.qwen/projects/<project>/chats/`.
+- **Droid provider.** Parses sessions from `~/.factory/projects/`.
+- **Durable daily cache.** Cache hydration extracted into shared `ensureCacheHydrated()` called by all commands. Schema migration fills missing fields instead of nuking the cache. Old cache versions backed up before reset. Atomic file writes with fsync.
+- **Copilot auto-model buckets.** Transcript inference uses auto-model naming for cleaner dashboard display.
+- **Cursor model aliases.** Built-in aliases for Cursor proxy model names.
+
+### Fixed (CLI)
+- **Gemini provider updated for JSONL format.** Supports Gemini CLI 0.39+ which switched from JSON to JSONL.
+- **Duplicate `hydrateCache()` call in JSON reports.** Removed redundant cache hydration inside `runJsonReport()`.
+
+### Changed (CLI)
+- Daily cache version bumped to v4 with backward-compatible migration (v2+ supported).
+- LiteLLM pricing snapshot replaces hardcoded pricing for Qwen and new models.
+- 16 providers now supported (was 10).
+
+### Added (macOS menubar)
+- **OpenClaw, Roo Code, KiloCode, Qwen, Droid tabs.** Agent tab strip updated for all new providers.
+- **Instant cached data display.** Shows cached data immediately instead of blocking on CLI refresh.
+
+### Fixed (macOS menubar)
+- **Menubar not dimming on inactive screens.**
+- **Performance improvements.** Reduced unnecessary redraws and CLI invocations.
+
+### Changed
+- README restructured with honeycomb provider hero image, 2x2 screenshot grid, and complete inline reference.
+- `bunx codeburn` added as alternative install option.
+
 ## 0.9.3 - 2026-04-28
 
 ### Added (CLI)
