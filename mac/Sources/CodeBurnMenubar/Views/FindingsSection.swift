@@ -213,11 +213,11 @@ private struct HistoryStats {
 
 private func computeHistoryStats(history: [DailyHistoryEntry]) -> HistoryStats {
     var calendar = Calendar(identifier: .gregorian)
-    calendar.timeZone = TimeZone(identifier: "UTC")!
+    calendar.timeZone = .current
     let formatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
-        f.timeZone = TimeZone(identifier: "UTC")
+        f.timeZone = .current
         return f
     }()
     let now = Date()

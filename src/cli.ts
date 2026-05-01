@@ -7,7 +7,7 @@ import { convertCost } from './currency.js'
 import { renderStatusBar } from './format.js'
 import { type PeriodData, type ProviderCost } from './menubar-json.js'
 import { buildMenubarPayload } from './menubar-json.js'
-import { getDaysInRange, ensureCacheHydrated, emptyCache, MS_PER_DAY, BACKFILL_DAYS, toDateString } from './daily-cache.js'
+import { getDaysInRange, ensureCacheHydrated, emptyCache, BACKFILL_DAYS, toDateString } from './daily-cache.js'
 import { aggregateProjectsIntoDays, buildPeriodDataFromDays, dateKey } from './day-aggregator.js'
 import { CATEGORY_LABELS, type DateRange, type ProjectSummary, type TaskCategory } from './types.js'
 import { renderDashboard } from './dashboard.js'
@@ -141,8 +141,19 @@ const program = new Command()
   .description('See where your AI coding tokens go - by task, tool, model, and project')
   .version(version)
   .option('--verbose', 'print warnings to stderr on read failures and skipped files')
+  .option('--timezone <zone>', 'IANA timezone for date grouping (e.g. Asia/Tokyo, America/New_York)')
 
 program.hook('preAction', async (thisCommand) => {
+  const tz = thisCommand.opts<{ timezone?: string }>().timezone ?? process.env['CODEBURN_TZ']
+  if (tz) {
+    try {
+      Intl.DateTimeFormat(undefined, { timeZone: tz })
+    } catch {
+      console.error(`\n  Invalid timezone: "${tz}". Use an IANA timezone like "America/New_York" or "Asia/Tokyo".\n`)
+      process.exit(1)
+    }
+    process.env.TZ = tz
+  }
   const config = await readConfig()
   setModelAliases(config.modelAliases ?? {})
   if (thisCommand.opts<{ verbose?: boolean }>().verbose) {
@@ -383,7 +394,7 @@ program
       const periodInfo = getDateRange(opts.period)
       const now = new Date()
       const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-      const yesterdayStr = toDateString(new Date(todayStart.getTime() - MS_PER_DAY))
+      const yesterdayStr = toDateString(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))
       const isAllProviders = pf === 'all'
 
       const cache = await hydrateCache()
@@ -454,7 +465,7 @@ program
       // Cache stores per-provider cost+calls per day in DailyEntry.providers, so we can derive
       // a provider-filtered history without re-parsing. Tokens aren't broken down per provider
       // in the cache, so the filtered view shows zero tokens (heatmap/trend still works on cost).
-      const historyStartStr = toDateString(new Date(todayStart.getTime() - BACKFILL_DAYS * MS_PER_DAY))
+      const historyStartStr = toDateString(new Date(now.getFullYear(), now.getMonth(), now.getDate() - BACKFILL_DAYS))
       const allCacheDays = getDaysInRange(cache, historyStartStr, yesterdayStr)
       // Parse only today for history; historical days come from cache
       const todayRangeForHistory: DateRange = { start: todayStart, end: new Date() }

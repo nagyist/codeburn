@@ -165,7 +165,7 @@ export async function ensureCacheHydrated(
   const now = new Date()
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const yesterdayEnd = new Date(todayStart.getTime() - 1)
-  const yesterdayStr = toDateString(new Date(todayStart.getTime() - MS_PER_DAY))
+  const yesterdayStr = toDateString(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))
 
   return withDailyCacheLock(async () => {
     let c = await loadDailyCache()
@@ -183,7 +183,7 @@ export async function ensureCacheHydrated(
           parseInt(c.lastComputedDate.slice(5, 7)) - 1,
           parseInt(c.lastComputedDate.slice(8, 10)) + 1
         )
-      : new Date(todayStart.getTime() - BACKFILL_DAYS * MS_PER_DAY)
+      : new Date(now.getFullYear(), now.getMonth(), now.getDate() - BACKFILL_DAYS)
 
     if (gapStart.getTime() <= yesterdayEnd.getTime()) {
       const gapRange: DateRange = { start: gapStart, end: yesterdayEnd }

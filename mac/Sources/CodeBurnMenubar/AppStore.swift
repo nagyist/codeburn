@@ -174,7 +174,10 @@ final class AppStore {
     /// last 7 days of dailyHistory. Used as the "tokens consumed in 7-day window" reading paired
     /// with the API-reported percent for capacity estimation.
     private func effectiveTokensInLast7Days(history: [DailyHistoryEntry], asOf now: Date) -> Double {
-        let cutoff = ISO8601DateFormatter().string(from: now.addingTimeInterval(-7 * 86400)).prefix(10)
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.timeZone = .current
+        let cutoff = f.string(from: now.addingTimeInterval(-7 * 86400))
         return history
             .filter { $0.date >= cutoff }
             .reduce(0.0) { $0 + $1.effectiveTokens }
