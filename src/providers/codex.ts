@@ -1,4 +1,6 @@
-import { readdir, stat, open } from 'fs/promises'
+import { readdir, stat } from 'fs/promises'
+import { createReadStream } from 'fs'
+import { createInterface } from 'readline'
 import { basename, join } from 'path'
 import { homedir } from 'os'
 
@@ -70,21 +72,29 @@ function sanitizeProject(cwd: string): string {
 }
 
 async function readFirstLine(filePath: string): Promise<CodexEntry | null> {
-  let fh
+  // Codex CLI 0.128+ writes a session_meta line that can exceed 20 KB because
+  // it embeds the full base_instructions / system prompt. A fixed-size buffer
+  // would miss the trailing newline and reject the session as invalid.
+  // Stream the file via readline to read the first line regardless of length.
+  const stream = createReadStream(filePath, { encoding: 'utf-8' })
+  const rl = createInterface({ input: stream, crlfDelay: Infinity })
+  let firstLine: string | undefined
   try {
-    fh = await open(filePath, 'r')
-    const buf = Buffer.alloc(16384)
-    const { bytesRead } = await fh.read(buf, 0, 16384, 0)
-    if (bytesRead === 0) return null
-    const text = buf.toString('utf-8', 0, bytesRead)
-    const nl = text.indexOf('\n')
-    const line = nl >= 0 ? text.slice(0, nl) : text
-    if (!line.trim()) return null
-    return JSON.parse(line) as CodexEntry
+    for await (const line of rl) {
+      firstLine = line
+      break
+    }
   } catch {
     return null
   } finally {
-    await fh?.close()
+    rl.close()
+    stream.destroy()
+  }
+  if (!firstLine || !firstLine.trim()) return null
+  try {
+    return JSON.parse(firstLine) as CodexEntry
+  } catch {
+    return null
   }
 }
 

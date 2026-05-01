@@ -123,6 +123,32 @@ describe('codex provider - session discovery', () => {
     expect(sessions).toHaveLength(1)
   })
 
+  it('accepts session_meta lines larger than 16 KB (Codex CLI 0.128+)', async () => {
+    // Codex CLI 0.128+ embeds the full base_instructions / system prompt in the
+    // first session_meta line, often pushing it past 20 KB. Regression guard
+    // against a fixed-size buffer in readFirstLine.
+    const bigPayload = JSON.stringify({
+      type: 'session_meta',
+      timestamp: '2026-05-02T00:00:00Z',
+      payload: {
+        cwd: '/Users/test/big',
+        originator: 'codex-tui',
+        session_id: 'sess-big',
+        model: 'gpt-5.5',
+        base_instructions: { text: 'x'.repeat(40_000) },
+      },
+    })
+    await writeSession(tmpDir, '2026-05-02', 'rollout-big.jsonl', [
+      bigPayload,
+      tokenCount({ last: { input: 100, output: 50 }, total: { total: 150 } }),
+    ])
+
+    const provider = createCodexProvider(tmpDir)
+    const sessions = await provider.discoverSessions()
+    expect(sessions).toHaveLength(1)
+    expect(sessions[0]!.path).toContain('rollout-big.jsonl')
+  })
+
   it('skips files without codex session_meta', async () => {
     const [year, month, day] = '2026-04-14'.split('-')
     const sessionDir = join(tmpDir, 'sessions', year!, month!, day!)
