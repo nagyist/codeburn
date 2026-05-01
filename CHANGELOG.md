@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.9.5 - 2026-05-01
+
+### Added (CLI)
+- **Homebrew tap.** `brew tap getagentseal/codeburn && brew install codeburn`.
+- **GPT-5.3 and DeepSeek display names.** GPT-5.3, DeepSeek Coder, DeepSeek Coder Max, DeepSeek R1.
+
+### Fixed (macOS menubar)
+- **Menubar refresh loop.** Was a single-fire Task that never repeated; now a proper while loop with 30s interval and `force: true`.
+- **Loading overlay flicker.** Counter-based `isLoading` so concurrent fetches don't toggle the overlay.
+- **Rapid tab switching race.** Previous fetch is cancelled when switching tabs; stale results are discarded via `Task.isCancelled`.
+- **Tab strip vs hero cost desync.** Provider-specific and all-provider data now fetched in parallel so costs arrive from the same snapshot.
+- **Stale menubar icon after wake.** `forceRefresh` now fetches today/all in parallel alongside the current selection.
+- **Accent color propagation.** `ThemeState` is now `@Observable`; removes `.id()` view hierarchy teardown hack.
+- **Currency flash on first switch.** Symbol and rate now apply atomically — no more wrong-symbol-with-old-rate flash.
+- **Export UI freeze.** Uses `terminationHandler` instead of `waitUntilExit`; HHmmss in filename prevents overwrite on double-export.
+- **CurrencyState concurrency.** Proper `@MainActor` isolation with `Sendable` conformance; `nonisolated` on pure static functions.
+- **Streak count.** Iterates calendar days instead of sparse history entries so gaps correctly break streaks.
+- **TrendBar chart flicker.** Stable date-based identity instead of UUID.
+
 ## 0.9.4 - 2026-04-29
 
 ### Added (CLI)

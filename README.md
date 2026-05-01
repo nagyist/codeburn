@@ -48,6 +48,13 @@ Everything runs locally. No wrapper, no proxy, no API keys. CodeBurn reads sessi
 npm install -g codeburn
 ```
 
+Or with Homebrew:
+
+```bash
+brew tap getagentseal/codeburn
+brew install codeburn
+```
+
 Or run directly without installing:
 
 ```bash
