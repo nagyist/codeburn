@@ -30,14 +30,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     let updateChecker = UpdateChecker()
     /// Held for the lifetime of the app to opt out of App Nap and Automatic Termination.
     private var backgroundActivity: NSObjectProtocol?
+    private var pendingRefreshWork: DispatchWorkItem?
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Set accessory policy before the app's focus chain forms. On macOS Tahoe
+        // (26.x), setting it after didFinishLaunching causes ghost status items
+        // because the policy gets baked into the initial focus chain.
+        NSApp.setActivationPolicy(.accessory)
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // On macOS Tahoe (26.x), accessory apps may fail to render their status item
-        // if the activation policy is set before the status item is created. Starting
-        // as a regular app and switching to accessory after setup works around this.
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-
         ProcessInfo.processInfo.automaticTerminationSupportEnabled = false
         ProcessInfo.processInfo.disableSuddenTermination()
         backgroundActivity = ProcessInfo.processInfo.beginActivity(
@@ -48,11 +50,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         restorePersistedCurrency()
         setupStatusItem()
         setupPopover()
-
-        // Switch to accessory policy after status item is set up to hide from Dock
-        DispatchQueue.main.async {
-            NSApp.setActivationPolicy(.accessory)
-        }
         observeStore()
         startRefreshLoop()
         setupWakeObservers()
@@ -222,9 +219,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             _ = store.payload
             _ = store.todayPayload
         } onChange: { [weak self] in
-            Task { @MainActor in
-                self?.refreshStatusButton()
-                self?.observeStore()
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.pendingRefreshWork?.cancel()
+                let work = DispatchWorkItem { [weak self] in
+                    self?.refreshStatusButton()
+                    self?.observeStore()
+                }
+                self.pendingRefreshWork = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
             }
         }
     }
