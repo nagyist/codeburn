@@ -4,6 +4,7 @@ import { homedir } from 'os'
 
 import { readSessionFile } from '../fs-utils.js'
 import { calculateCost } from '../models.js'
+import { extractBashCommands } from '../bash-utils.js'
 import type { Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
 const toolNameMap: Record<string, string> = {
@@ -78,8 +79,7 @@ function extractTools(content: Array<{ type?: string; name?: string; arguments?:
       const mapped = toolNameMap[block.name] ?? block.name
       tools.push(mapped)
       if (mapped === 'Bash' && block.arguments && typeof block.arguments.command === 'string') {
-        const cmd = block.arguments.command.split(/\s+/)[0] ?? ''
-        if (cmd) bashCommands.push(cmd)
+        bashCommands.push(...extractBashCommands(block.arguments.command))
       }
     }
   }

@@ -2,6 +2,7 @@ import { join } from 'path'
 import { homedir, platform } from 'os'
 
 import { calculateCost, getShortModelName } from '../models.js'
+import { extractBashCommands } from '../bash-utils.js'
 import { isSqliteAvailable, getSqliteLoadError, openDatabase, type SqliteDatabase } from '../sqlite.js'
 import type { Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
@@ -109,8 +110,9 @@ function extractToolsFromMessages(db: SqliteDatabase, sessionId: string): { tool
         if (mapped === 'Bash') {
           const cmd = item.toolCall?.value?.arguments?.command
           if (typeof cmd === 'string') {
-            const first = cmd.split(/\s+/)[0] ?? ''
-            if (first && !bashCommands.includes(first)) bashCommands.push(first)
+            for (const c of extractBashCommands(cmd)) {
+              if (!bashCommands.includes(c)) bashCommands.push(c)
+            }
           }
         }
       }

@@ -1,12 +1,14 @@
 import { basename } from 'path'
+import stripAnsi from 'strip-ansi'
 
 function stripQuotedStrings(command: string): string {
   return command.replace(/"[^"]*"|'[^']*'/g, match => ' '.repeat(match.length))
 }
 
-export function extractBashCommands(command: string): string[] {
-  if (!command || !command.trim()) return []
+export function extractBashCommands(rawCommand: string): string[] {
+  if (!rawCommand || !rawCommand.trim()) return []
 
+  const command = stripAnsi(rawCommand)
   const stripped = stripQuotedStrings(command)
 
   const separatorRegex = /\s*(?:&&|;|\|)\s*/g

@@ -3,6 +3,7 @@ import { join } from 'path'
 import { homedir } from 'os'
 
 import { calculateCost } from '../models.js'
+import { extractBashCommands } from '../bash-utils.js'
 import type { Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
 const toolNameMap: Record<string, string> = {
@@ -93,8 +94,7 @@ function parseSession(data: GeminiSession, seenKeys: Set<string>): ParsedProvide
         const mapped = toolNameMap[tc.displayName ?? ''] ?? toolNameMap[tc.name] ?? tc.displayName ?? tc.name
         allTools.push(mapped)
         if (mapped === 'Bash' && tc.args && typeof tc.args.command === 'string') {
-          const cmd = tc.args.command.split(/\s+/)[0] ?? ''
-          if (cmd) bashCommands.push(cmd)
+          bashCommands.push(...extractBashCommands(tc.args.command))
         }
       }
     }

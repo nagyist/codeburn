@@ -4,6 +4,7 @@ import { homedir } from 'os'
 
 import { readSessionFile } from '../fs-utils.js'
 import { calculateCost } from '../models.js'
+import { extractBashCommands } from '../bash-utils.js'
 import type { Provider, SessionSource, SessionParser, ParsedProviderCall } from './types.js'
 
 const toolNameMap: Record<string, string> = {
@@ -66,8 +67,7 @@ function extractTools(parts: QwenPart[]): { tools: string[]; bashCommands: strin
       const mapped = toolNameMap[part.functionCall.name] ?? part.functionCall.name
       tools.push(mapped)
       if (mapped === 'Bash' && part.functionCall.args && typeof part.functionCall.args['command'] === 'string') {
-        const cmd = (part.functionCall.args['command'] as string).split(/\s+/)[0] ?? ''
-        if (cmd) bashCommands.push(cmd)
+        bashCommands.push(...extractBashCommands(part.functionCall.args['command'] as string))
       }
     }
   }
