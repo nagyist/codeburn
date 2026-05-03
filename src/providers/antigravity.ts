@@ -340,6 +340,7 @@ function createParser(source: SessionSource, seenKeys: Set<string>): SessionPars
 }
 
 const modelDisplayNames: Record<string, string> = {
+  'gemini-3-pro': 'Gemini 3 Pro',
   'gemini-3.1-pro-high': 'Gemini 3.1 Pro',
   'gemini-3.1-pro-low': 'Gemini 3.1 Pro (Low)',
   'gemini-3-flash': 'Gemini 3 Flash',

@@ -154,6 +154,9 @@ const BUILTIN_ALIASES: Record<string, string> = {
   'gemini-3.1-pro-high':            'gemini-3.1-pro-preview',
   'gemini-3.1-pro-low':             'gemini-3.1-pro-preview',
   'gemini-3-flash-agent':           'gemini-3-flash-preview',
+  'gemini-3-pro':                   'gemini-3-pro-preview',
+  'gemini-3.1-flash-image':         'gemini-3.1-flash-image-preview',
+  'gemini-3.1-flash-lite':          'gemini-3.1-flash-lite-preview',
 }
 
 let userAliases: Record<string, string> = {}
