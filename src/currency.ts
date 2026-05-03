@@ -151,5 +151,6 @@ export function formatCost(costUSD: number): string {
 
   if (cost >= 1) return `${symbol}${cost.toFixed(2)}`
   if (cost >= 0.01) return `${symbol}${cost.toFixed(3)}`
-  return `${symbol}${cost.toFixed(4)}`
+  if (cost >= 0.0001) return `${symbol}${cost.toFixed(4)}`
+  return `${symbol}${cost.toFixed(2)}`
 }
