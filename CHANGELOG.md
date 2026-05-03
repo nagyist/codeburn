@@ -4,7 +4,7 @@
 
 ### Added (CLI)
 - **Goose provider.** New provider for Block's Goose AI coding assistant.
-- **Antigravity provider.** New provider for Windsurf/Antigravity IDE sessions.
+- **Antigravity provider.** New provider for Antigravity IDE sessions.
 - **Antigravity model aliases.** gemini-3-pro, flash-image, flash-lite, and community-contributed Gemini model IDs.
 - **GPT-5.5 display name** for Codex.
 - **Deno support.** `deno dx` added as a run method.

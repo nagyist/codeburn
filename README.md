@@ -13,7 +13,7 @@
     <a href="https://github.com/sponsors/iamtoruk"><img src="https://img.shields.io/badge/sponsor-♥-ea4aaa?logo=github" alt="Sponsor" /></a>                                                  
   </p> 
 
-CodeBurn tracks token usage, cost, and performance across **16 AI coding tools**. It breaks down spending by task type, model, tool, project, and provider so you can see exactly where your budget goes.
+CodeBurn tracks token usage, cost, and performance across **18 AI coding tools**. It breaks down spending by task type, model, tool, project, and provider so you can see exactly where your budget goes.
 
 Everything runs locally. No wrapper, no proxy, no API keys. CodeBurn reads session data directly from disk and prices every call using [LiteLLM](https://github.com/BerriAI/litellm).
 
@@ -107,6 +107,8 @@ Arrow keys switch between Today, 7 Days, 30 Days, Month, and All Time. Press `q`
 | Roo Code | VS Code `globalStorage/rooveterinaryinc.roo-cline/tasks/` | Yes |
 | KiloCode | VS Code `globalStorage/kilocode.kilo-code/tasks/` | Yes |
 | Qwen | `~/.qwen/projects/<project>/chats/` | Yes |
+| Goose | `~/.local/share/goose/sessions/sessions.db` (SQLite) | Yes |
+| Antigravity | `~/.gemini/antigravity/conversations/` | Yes |
 
 Paths shown are for macOS. Linux and Windows equivalents are detected automatically. If a path has changed or is wrong, please [open an issue](https://github.com/getagentseal/codeburn/issues).
 
@@ -412,6 +414,8 @@ src/
     pi.ts           Pi/OMP agent JSONL session parsing
     qwen.ts         Qwen CLI JSONL session parsing
     roo-code.ts     Roo Code VS Code extension parsing
+    goose.ts        Goose SQLite session parsing
+    antigravity.ts  Antigravity conversation parsing
 ```
 
 ## Star History
