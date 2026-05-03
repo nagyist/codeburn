@@ -148,6 +148,12 @@ const BUILTIN_ALIASES: Record<string, string> = {
   'gpt-4.1':                        'gpt-4.1',
   'gpt-5.2-low':                    'gpt-5',
   'gpt-5.1-codex-high':             'gpt-5.3-codex',
+  // Antigravity Gemini model IDs resolve to preview-priced entries.
+  'gemini-3.1-pro':                 'gemini-3.1-pro-preview',
+  'gemini-3-flash':                 'gemini-3-flash-preview',
+  'gemini-3.1-pro-high':            'gemini-3.1-pro-preview',
+  'gemini-3.1-pro-low':             'gemini-3.1-pro-preview',
+  'gemini-3-flash-agent':           'gemini-3-flash-preview',
 }
 
 let userAliases: Record<string, string> = {}
