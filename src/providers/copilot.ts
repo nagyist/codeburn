@@ -196,7 +196,7 @@ function inferModelFromToolCallIds(events: TranscriptEvent[]): string {
     return [...modelCounts.entries()].sort((a, b) => b[1] - a[1])[0]![0]
   }
 
-  return COPILOT_OPENAI_AUTO
+  return 'copilot-auto'
 }
 
 function parseTranscriptEvents(content: string, sessionId: string, seenKeys: Set<string>): ParsedProviderCall[] {
