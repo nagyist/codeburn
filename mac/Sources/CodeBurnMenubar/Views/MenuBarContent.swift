@@ -109,7 +109,7 @@ private struct EmptyProviderState: View {
         case .sevenDays: "the last 7 days"
         case .thirtyDays: "the last 30 days"
         case .month: "this month"
-        case .all: "all time"
+        case .all: "the last 6 months"
         }
     }
 }
