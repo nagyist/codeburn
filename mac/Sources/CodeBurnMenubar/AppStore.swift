@@ -321,7 +321,7 @@ enum Period: String, CaseIterable, Identifiable {
     case sevenDays = "7 Days"
     case thirtyDays = "30 Days"
     case month = "Month"
-    case all = "All"
+    case all = "6 Months"
 
     var id: String { rawValue }
 

@@ -591,7 +591,7 @@ function StatusBar({ width, showProvider, view, findingCount, optimizeAvailable,
         <Text color={ORANGE} bold>2</Text><Text dimColor> week   </Text>
         <Text color={ORANGE} bold>3</Text><Text dimColor> 30 days   </Text>
         <Text color={ORANGE} bold>4</Text><Text dimColor> month   </Text>
-        <Text color={ORANGE} bold>5</Text><Text dimColor> all time</Text>
+        <Text color={ORANGE} bold>5</Text><Text dimColor> 6 months</Text>
         {!isOptimize && optimizeAvailable && findingCount != null && findingCount > 0 && (
           <><Text dimColor>   </Text><Text color={ORANGE} bold>o</Text><Text dimColor> optimize</Text><Text color="#F55B5B"> ({findingCount})</Text></>
         )}
