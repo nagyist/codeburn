@@ -200,8 +200,8 @@ describe('estimateMcpSchemaCost', () => {
     const cost = estimateMcpSchemaCost(30, [project(sessions)], 'svc')
     expect(cost.cacheWriteTokens).toBe(12_000) // capped by 50k creation, 12k schema fits
     expect(cost.cacheReadTokens).toBe(24_000)  // 12k + 12k across two ongoing turns
-    // effective = write + read * 0.10 (cache discount)
-    expect(cost.effectiveInputTokens).toBeCloseTo(12_000 + 24_000 * 0.10, 5)
+    // effective = write * 1.25 + read * 0.10 (cache pricing)
+    expect(cost.effectiveInputTokens).toBeCloseTo(12_000 * 1.25 + 24_000 * 0.10, 5)
   })
 
   it('caps by available cache bucket so we never overclaim', () => {
@@ -373,7 +373,7 @@ describe('detectMcpToolCoverage', () => {
     expect(finding!.explanation).toContain('hf')
     expect(finding!.explanation).toContain('1/30')
     expect(finding!.fix.type).toBe('command')
-    expect((finding!.fix as { text: string }).text).toContain('claude mcp remove hf')
+    expect((finding!.fix as { text: string }).text).toContain("claude mcp remove 'hf'")
     expect(finding!.tokensSaved).toBeGreaterThan(0)
   })
 

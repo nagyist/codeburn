@@ -60,10 +60,11 @@ const MCP_COVERAGE_MIN_TOOLS = 10
 const MCP_COVERAGE_MIN_SESSIONS = 2
 const MCP_COVERAGE_LOW_THRESHOLD = 0.20
 const MCP_COVERAGE_HIGH_IMPACT_TOKENS = 200_000
-// Anthropic prices cached input reads at roughly 10% of fresh input. We use
-// this to keep "ongoing" overhead estimates honest: most MCP schema bytes
-// live in the cached prefix and only get charged at the discount rate after
-// the first turn of a session.
+// Anthropic prices cache writes at 125% of base input and cache reads at
+// roughly 10% of base input. We use these to keep overhead estimates honest:
+// most MCP schema bytes live in the cached prefix and only get charged at
+// the discount rate after the first turn of a session.
+const CACHE_WRITE_MULTIPLIER = 1.25
 const CACHE_READ_DISCOUNT = 0.10
 const GHOST_AGENTS_HIGH_THRESHOLD = 5
 const GHOST_AGENTS_MEDIUM_THRESHOLD = 2
@@ -729,7 +730,7 @@ export function estimateMcpSchemaCost(
     }
   }
 
-  const effectiveInputTokens = cacheWriteTokens + cacheReadTokens * CACHE_READ_DISCOUNT
+  const effectiveInputTokens = cacheWriteTokens * CACHE_WRITE_MULTIPLIER + cacheReadTokens * CACHE_READ_DISCOUNT
   return { cacheWriteTokens, cacheReadTokens, effectiveInputTokens }
 }
 
@@ -774,7 +775,7 @@ export function detectMcpToolCoverage(
     lines.push(
       `${c.server}: ${c.toolsInvoked}/${c.toolsAvailable} tools used (${pct}% coverage) across ${c.loadedSessions} session${c.loadedSessions === 1 ? '' : 's'}`,
     )
-    removeCommands.push(`claude mcp remove ${c.server}`)
+    removeCommands.push(`claude mcp remove '${c.server}'`)
   }
 
   // Single combined cost pass: caps each call's contribution at the
