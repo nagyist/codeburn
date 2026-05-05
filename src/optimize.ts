@@ -507,6 +507,12 @@ export type McpServerCoverage = {
   coverageRatio: number
 }
 
+type McpSchemaCostEstimate = {
+  cacheWriteTokens: number
+  cacheReadTokens: number
+  effectiveInputTokens: number
+}
+
 /**
  * Aggregate MCP inventory and invocations across the projects in scope.
  *
@@ -652,15 +658,35 @@ export function aggregateMcpCoverage(projects: ProjectSummary[]): McpServerCover
  * `loadedSessions`.
  */
 export function estimateMcpSchemaCost(
+  unusedToolCount: number,
+  projects: ProjectSummary[],
+  server: string,
+): McpSchemaCostEstimate
+export function estimateMcpSchemaCost(
+  unusedToolCountsByServer: Record<string, number>,
+  projects: ProjectSummary[],
+  servers: string[],
+): McpSchemaCostEstimate
+export function estimateMcpSchemaCost(
   unusedToolCounts: Record<string, number> | number,
   projects: ProjectSummary[],
   serverOrServers: string | string[],
-): { cacheWriteTokens: number; cacheReadTokens: number; effectiveInputTokens: number } {
-  // Backward-compatible single-server signature used by tests.
-  const servers = Array.isArray(serverOrServers) ? serverOrServers : [serverOrServers]
-  const counts: Record<string, number> = typeof unusedToolCounts === 'number'
-    ? { [serverOrServers as string]: unusedToolCounts }
-    : unusedToolCounts
+): McpSchemaCostEstimate {
+  let servers: string[]
+  let counts: Record<string, number>
+  if (typeof unusedToolCounts === 'number') {
+    if (typeof serverOrServers !== 'string') {
+      throw new TypeError('single-server MCP cost estimates require a string server name')
+    }
+    servers = [serverOrServers]
+    counts = { [serverOrServers]: unusedToolCounts }
+  } else {
+    if (!Array.isArray(serverOrServers)) {
+      throw new TypeError('multi-server MCP cost estimates require a string[] server list')
+    }
+    servers = serverOrServers
+    counts = unusedToolCounts
+  }
 
   const totalUnusedSchemaTokens = servers.reduce(
     (s, srv) => s + (counts[srv] ?? 0) * TOKENS_PER_MCP_TOOL,
@@ -723,8 +749,8 @@ export function estimateMcpSchemaCost(
  */
 export function detectMcpToolCoverage(
   projects: ProjectSummary[],
+  coverage = aggregateMcpCoverage(projects),
 ): WasteFinding | null {
-  const coverage = aggregateMcpCoverage(projects)
   if (coverage.length === 0) return null
 
   const flagged = coverage.filter(c =>
@@ -785,6 +811,7 @@ export function detectUnusedMcp(
   calls: ToolCall[],
   projects: ProjectSummary[],
   projectCwds: Set<string>,
+  mcpCoverage = aggregateMcpCoverage(projects),
 ): WasteFinding | null {
   const configured = loadMcpConfigs(projectCwds)
   if (configured.size === 0) return null
@@ -808,7 +835,7 @@ export function detectUnusedMcp(
   // thresholds — a small, inventoried-but-uninvoked server that the
   // coverage detector skips would otherwise become a blind spot.
   const coverageReportedServers = new Set(
-    aggregateMcpCoverage(projects)
+    mcpCoverage
       .filter(c =>
         c.toolsAvailable > MCP_COVERAGE_MIN_TOOLS
         && c.loadedSessions >= MCP_COVERAGE_MIN_SESSIONS
@@ -1286,6 +1313,7 @@ export async function scanAndDetect(
 
   const costRate = computeInputCostRate(projects)
   const { toolCalls, projectCwds, apiCalls, userMessages } = await scanSessions(dateRange)
+  const mcpCoverage = aggregateMcpCoverage(projects)
 
   const findings: WasteFinding[] = []
   const syncDetectors: Array<() => WasteFinding | null> = [
@@ -1293,8 +1321,8 @@ export async function scanAndDetect(
     () => detectLowReadEditRatio(toolCalls),
     () => detectJunkReads(toolCalls, dateRange),
     () => detectDuplicateReads(toolCalls, dateRange),
-    () => detectUnusedMcp(toolCalls, projects, projectCwds),
-    () => detectMcpToolCoverage(projects),
+    () => detectUnusedMcp(toolCalls, projects, projectCwds, mcpCoverage),
+    () => detectMcpToolCoverage(projects, mcpCoverage),
     () => detectBloatedClaudeMd(projectCwds),
     () => detectBashBloat(),
   ]
