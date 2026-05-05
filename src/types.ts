@@ -121,6 +121,12 @@ export type SessionSummary = {
   bashBreakdown: Record<string, { calls: number }>
   categoryBreakdown: Record<TaskCategory, { turns: number; costUSD: number; retries: number; editTurns: number; oneShotTurns: number }>
   skillBreakdown: Record<string, { turns: number; costUSD: number; editTurns: number; oneShotTurns: number }>
+  // Observed MCP tools available in this session, captured from
+  // `attachment.deferred_tools_delta.addedNames` entries. Union across all
+  // turns. Each name is a fully-qualified `mcp__<server>__<tool>` identifier.
+  // Built-in tools (Bash, Edit, etc.) are filtered out. Provider-agnostic field;
+  // currently populated only by the Claude parser.
+  mcpInventory?: string[]
 }
 
 export type ProjectSummary = {

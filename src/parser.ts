@@ -203,10 +203,54 @@ function groupIntoTurns(entries: JournalEntry[], seenMsgIds: Set<string>): Parse
   return turns
 }
 
+/**
+ * Extract MCP tool inventory observed across a session's JSONL entries.
+ *
+ * Claude Code emits `attachment.type === "deferred_tools_delta"` entries whose
+ * `addedNames` array lists every tool currently available at that turn (built-in
+ * tools plus all `mcp__<server>__<tool>` names exposed by configured MCP
+ * servers). Tool inventory can change mid-session if the user reloads MCP
+ * config, so we union every occurrence rather than trusting only the first.
+ *
+ * Built-in tools are filtered out: only `mcp__*` identifiers survive.
+ */
+// Fully-qualified MCP tool name shape: `mcp__<server>__<tool>`. Both server
+// and tool segments must be non-empty. Names like `mcp__server` (no tool
+// segment) or `mcp__server__` (trailing empty tool) would silently pollute
+// the inventory and break downstream `split('__')` consumers, so they're
+// rejected here.
+function isMcpToolName(name: string): boolean {
+  if (!name.startsWith('mcp__')) return false
+  const rest = name.slice(5) // strip `mcp__`
+  const sep = rest.indexOf('__')
+  if (sep <= 0) return false                   // missing or empty server
+  if (sep >= rest.length - 2) return false     // missing or empty tool
+  return true
+}
+
+export function extractMcpInventory(entries: JournalEntry[]): string[] {
+  const inventory = new Set<string>()
+  for (const entry of entries) {
+    const att = entry['attachment']
+    if (!att || typeof att !== 'object') continue
+    const a = att as { type?: unknown; addedNames?: unknown }
+    if (a.type !== 'deferred_tools_delta') continue
+    if (!Array.isArray(a.addedNames)) continue
+    for (const name of a.addedNames) {
+      if (typeof name !== 'string') continue
+      if (!isMcpToolName(name)) continue
+      inventory.add(name)
+    }
+  }
+  if (inventory.size === 0) return []
+  return Array.from(inventory).sort()
+}
+
 function buildSessionSummary(
   sessionId: string,
   project: string,
   turns: ClassifiedTurn[],
+  mcpInventory?: string[],
 ): SessionSummary {
   const modelBreakdown: SessionSummary['modelBreakdown'] = Object.create(null)
   const toolBreakdown: SessionSummary['toolBreakdown'] = Object.create(null)
@@ -311,6 +355,7 @@ function buildSessionSummary(
     bashBreakdown,
     categoryBreakdown,
     skillBreakdown,
+    ...(mcpInventory && mcpInventory.length > 0 ? { mcpInventory } : {}),
   }
 }
 
@@ -362,7 +407,14 @@ async function parseSessionFile(
   }
   const classified = turns.map(classifyTurn)
 
-  return buildSessionSummary(sessionId, project, classified)
+  // Inventory is extracted from the full entry stream, not just the
+  // turns we kept after date filtering: tool availability is set up
+  // once at the start of a session (with possible mid-session reloads),
+  // and we want to reflect what was loaded even if the user only ran
+  // turns inside a narrow date window.
+  const mcpInventory = extractMcpInventory(entries)
+
+  return buildSessionSummary(sessionId, project, classified, mcpInventory)
 }
 
 async function collectJsonlFiles(dirPath: string): Promise<string[]> {
