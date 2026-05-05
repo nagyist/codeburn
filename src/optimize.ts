@@ -53,6 +53,19 @@ const LOW_RATIO_MEDIUM_THRESHOLD = 3
 const MIN_API_CALLS_FOR_CACHE = 10
 const CACHE_EXCESS_HIGH_THRESHOLD = 15000
 const UNUSED_MCP_HIGH_THRESHOLD = 3
+// MCP tool coverage detector thresholds. A server only earns a finding when
+// every condition holds: the inventory is large enough to matter, real-world
+// usage is poor, and we observed it in enough sessions to trust the signal.
+const MCP_COVERAGE_MIN_TOOLS = 10
+const MCP_COVERAGE_MIN_SESSIONS = 2
+const MCP_COVERAGE_LOW_THRESHOLD = 0.20
+const MCP_COVERAGE_HIGH_IMPACT_TOKENS = 200_000
+// Anthropic prices cache writes at 125% of base input and cache reads at
+// roughly 10% of base input. We use these to keep overhead estimates honest:
+// most MCP schema bytes live in the cached prefix and only get charged at
+// the discount rate after the first turn of a session.
+const CACHE_WRITE_MULTIPLIER = 1.25
+const CACHE_READ_DISCOUNT = 0.10
 const GHOST_AGENTS_HIGH_THRESHOLD = 5
 const GHOST_AGENTS_MEDIUM_THRESHOLD = 2
 const GHOST_SKILLS_HIGH_THRESHOLD = 10
@@ -477,10 +490,329 @@ export function detectDuplicateReads(calls: ToolCall[], dateRange?: DateRange): 
   }
 }
 
+/**
+ * Per-server breakdown of MCP tool inventory vs invocations, computed from the
+ * `mcpInventory` field captured by the Claude parser.
+ *
+ * Each session that loaded a server contributes its observed tool list to
+ * the union for that server. Invocations come from the existing
+ * `mcpBreakdown` per-call counts plus the parser's `call.tools` stream.
+ */
+export type McpServerCoverage = {
+  server: string
+  toolsAvailable: number
+  toolsInvoked: number
+  unusedTools: string[]
+  invocations: number
+  loadedSessions: number
+  coverageRatio: number
+}
+
+type McpSchemaCostEstimate = {
+  cacheWriteTokens: number
+  cacheReadTokens: number
+  effectiveInputTokens: number
+}
+
+/**
+ * Aggregate MCP inventory and invocations across the projects in scope.
+ *
+ * Returns one entry per `mcp__<server>__*` namespace observed in any
+ * session's `mcpInventory`. Counts of invocations come from
+ * `session.mcpBreakdown` (per-server call totals already maintained by the
+ * parser).
+ */
+export function aggregateMcpCoverage(projects: ProjectSummary[]): McpServerCoverage[] {
+  type ServerAcc = {
+    inventory: Set<string>
+    invokedTools: Set<string>
+    invocations: number
+    loadedSessions: number
+  }
+  const servers = new Map<string, ServerAcc>()
+
+  function getOrInit(server: string): ServerAcc {
+    let acc = servers.get(server)
+    if (!acc) {
+      acc = { inventory: new Set(), invokedTools: new Set(), invocations: 0, loadedSessions: 0 }
+      servers.set(server, acc)
+    }
+    return acc
+  }
+
+  for (const project of projects) {
+    for (const session of project.sessions) {
+      // Only sessions with an observed inventory count toward `loadedSessions`.
+      // Pure invocation-only sessions (server seen via `call.mcpTools` or
+      // `session.mcpBreakdown` without any matching `deferred_tools_delta`)
+      // could otherwise satisfy the `MCP_COVERAGE_MIN_SESSIONS` threshold
+      // without giving us evidence that the schema was actually loaded.
+      const inventoriedServers = new Set<string>()
+      const sessionInvoked = new Map<string, Set<string>>()
+
+      // Inventory: union of tools observed available in this session.
+      for (const fqn of session.mcpInventory ?? []) {
+        const parts = fqn.split('__')
+        if (parts.length < 3 || parts[0] !== 'mcp') continue
+        const server = parts[1]
+        if (!server) continue
+        const tool = parts.slice(2).join('__')
+        if (!tool) continue
+        const acc = getOrInit(server)
+        acc.inventory.add(fqn)
+        inventoriedServers.add(server)
+      }
+
+      // Invoked tools: walk turns to collect per-tool invocations. We can't
+      // get this from session.mcpBreakdown alone because that's keyed by
+      // server, not tool.
+      for (const turn of session.turns) {
+        for (const call of turn.assistantCalls) {
+          for (const fqn of call.mcpTools) {
+            const parts = fqn.split('__')
+            if (parts.length < 3 || parts[0] !== 'mcp') continue
+            const server = parts[1]
+            if (!server) continue
+            let invoked = sessionInvoked.get(server)
+            if (!invoked) {
+              invoked = new Set()
+              sessionInvoked.set(server, invoked)
+            }
+            invoked.add(fqn)
+          }
+        }
+      }
+
+      // Invocation totals: trust mcpBreakdown which was already aggregated
+      // turn-by-turn, including any invocations the inventory pass missed.
+      for (const [server, data] of Object.entries(session.mcpBreakdown)) {
+        const acc = getOrInit(server)
+        acc.invocations += data.calls
+      }
+
+      for (const [server, invoked] of sessionInvoked) {
+        const acc = getOrInit(server)
+        for (const fqn of invoked) acc.invokedTools.add(fqn)
+      }
+
+      for (const server of inventoriedServers) {
+        getOrInit(server).loadedSessions += 1
+      }
+    }
+  }
+
+  const result: McpServerCoverage[] = []
+  for (const [server, acc] of servers) {
+    if (acc.inventory.size === 0) continue
+    // Coverage is only meaningful against tools we actually observed in the
+    // inventory: invocations of tools never inventoried (older config, typo,
+    // etc.) would otherwise inflate the numerator and could even drive
+    // `unusedCount` negative.
+    const invokedInInventory = new Set<string>()
+    for (const fqn of acc.invokedTools) {
+      if (acc.inventory.has(fqn)) invokedInInventory.add(fqn)
+    }
+    const unusedTools = Array.from(acc.inventory).filter(t => !invokedInInventory.has(t)).sort()
+    const toolsInvoked = acc.inventory.size - unusedTools.length
+    result.push({
+      server,
+      toolsAvailable: acc.inventory.size,
+      toolsInvoked,
+      unusedTools,
+      invocations: acc.invocations,
+      loadedSessions: acc.loadedSessions,
+      coverageRatio: acc.inventory.size === 0 ? 0 : toolsInvoked / acc.inventory.size,
+    })
+  }
+  result.sort((a, b) => b.toolsAvailable - a.toolsAvailable)
+  return result
+}
+
+/**
+ * Cache-aware token cost estimate for the unused-tool overhead of one or
+ * more servers, summed across all sessions that loaded any of them.
+ *
+ * Returns three buckets:
+ * - `cacheWriteTokens`: schema bytes paid at full input price (each
+ *    cache-creation event in a session that loaded one of the servers).
+ * - `cacheReadTokens`: schema bytes carried at the cache-read discount on
+ *    subsequent turns (ongoing overhead).
+ * - `effectiveInputTokens`: equivalent fresh-input tokens, weighted by
+ *    cache pricing. Used to estimate dollar cost downstream by multiplying
+ *    by the project's input rate.
+ *
+ * We cap each call's contribution at the observed cache-creation /
+ * cache-read totals for that call: it is not meaningful to claim more MCP
+ * overhead than the call's own cache bucket could possibly contain. The
+ * cap is applied once across the combined unused-schema budget for all
+ * flagged servers, not per server, so two flagged servers cannot both
+ * independently claim the same call's cache bucket.
+ *
+ * Anthropic caches expire after roughly 5 minutes of inactivity, so a long
+ * session can rebuild the cache multiple times. Every call that reports
+ * `cacheCreationInputTokens > 0` is treated as another rebuild, not just
+ * the very first one.
+ *
+ * "Loaded" is defined exclusively by observed inventory: a session that
+ * invoked a server without ever emitting a `deferred_tools_delta` for it
+ * does not count, matching the invariant `aggregateMcpCoverage` uses for
+ * `loadedSessions`.
+ */
+export function estimateMcpSchemaCost(
+  unusedToolCount: number,
+  projects: ProjectSummary[],
+  server: string,
+): McpSchemaCostEstimate
+export function estimateMcpSchemaCost(
+  unusedToolCountsByServer: Record<string, number>,
+  projects: ProjectSummary[],
+  servers: string[],
+): McpSchemaCostEstimate
+export function estimateMcpSchemaCost(
+  unusedToolCounts: Record<string, number> | number,
+  projects: ProjectSummary[],
+  serverOrServers: string | string[],
+): McpSchemaCostEstimate {
+  let servers: string[]
+  let counts: Record<string, number>
+  if (typeof unusedToolCounts === 'number') {
+    if (typeof serverOrServers !== 'string') {
+      throw new TypeError('single-server MCP cost estimates require a string server name')
+    }
+    servers = [serverOrServers]
+    counts = { [serverOrServers]: unusedToolCounts }
+  } else {
+    if (!Array.isArray(serverOrServers)) {
+      throw new TypeError('multi-server MCP cost estimates require a string[] server list')
+    }
+    servers = serverOrServers
+    counts = unusedToolCounts
+  }
+
+  const totalUnusedSchemaTokens = servers.reduce(
+    (s, srv) => s + (counts[srv] ?? 0) * TOKENS_PER_MCP_TOOL,
+    0,
+  )
+  if (totalUnusedSchemaTokens === 0) {
+    return { cacheWriteTokens: 0, cacheReadTokens: 0, effectiveInputTokens: 0 }
+  }
+
+  const serverSet = new Set(servers)
+  let cacheWriteTokens = 0
+  let cacheReadTokens = 0
+
+  for (const project of projects) {
+    for (const session of project.sessions) {
+      // A session counts only if its observed inventory included at least
+      // one of the flagged servers — same invariant `aggregateMcpCoverage`
+      // uses for `loadedSessions`.
+      let loaded = false
+      for (const fqn of session.mcpInventory ?? []) {
+        const seg = fqn.split('__')[1]
+        if (seg && serverSet.has(seg)) { loaded = true; break }
+      }
+      if (!loaded) continue
+
+      for (const turn of session.turns) {
+        for (const call of turn.assistantCalls) {
+          // Both buckets can be non-zero on the same call (cache rebuild
+          // alongside a partial read), so account for them independently.
+          // The cap is applied to the combined unused-schema budget so
+          // multiple flagged servers cannot all claim the same call.
+          if (call.usage.cacheCreationInputTokens > 0) {
+            cacheWriteTokens += Math.min(totalUnusedSchemaTokens, call.usage.cacheCreationInputTokens)
+          }
+          if (call.usage.cacheReadInputTokens > 0) {
+            cacheReadTokens += Math.min(totalUnusedSchemaTokens, call.usage.cacheReadInputTokens)
+          }
+        }
+      }
+    }
+  }
+
+  const effectiveInputTokens = cacheWriteTokens * CACHE_WRITE_MULTIPLIER + cacheReadTokens * CACHE_READ_DISCOUNT
+  return { cacheWriteTokens, cacheReadTokens, effectiveInputTokens }
+}
+
+/**
+ * Find MCP servers whose tool inventory is largely unused. Replaces the
+ * older server-only `detectUnusedMcp` (which only flagged servers with
+ * literal zero invocations).
+ *
+ * A server is flagged when, taken together:
+ *   - it exposed more than `MCP_COVERAGE_MIN_TOOLS` tools,
+ *   - we saw it loaded in at least `MCP_COVERAGE_MIN_SESSIONS` sessions,
+ *   - the coverage ratio is below `MCP_COVERAGE_LOW_THRESHOLD`.
+ *
+ * Token-savings estimates use the cache-aware accounting from
+ * `estimateMcpSchemaCost` so we don't mistake cached-prefix carry-over for
+ * fresh-input billing.
+ */
+export function detectMcpToolCoverage(
+  projects: ProjectSummary[],
+  coverage = aggregateMcpCoverage(projects),
+): WasteFinding | null {
+  if (coverage.length === 0) return null
+
+  const flagged = coverage.filter(c =>
+    c.toolsAvailable > MCP_COVERAGE_MIN_TOOLS
+    && c.loadedSessions >= MCP_COVERAGE_MIN_SESSIONS
+    && c.coverageRatio < MCP_COVERAGE_LOW_THRESHOLD,
+  )
+  if (flagged.length === 0) return null
+
+  flagged.sort((a, b) => (b.toolsAvailable - b.toolsInvoked) - (a.toolsAvailable - a.toolsInvoked))
+
+  const lines: string[] = []
+  const removeCommands: string[] = []
+  const unusedCountsByServer: Record<string, number> = {}
+  const flaggedServers: string[] = []
+
+  for (const c of flagged) {
+    unusedCountsByServer[c.server] = c.toolsAvailable - c.toolsInvoked
+    flaggedServers.push(c.server)
+    const pct = Math.round(c.coverageRatio * 100)
+    lines.push(
+      `${c.server}: ${c.toolsInvoked}/${c.toolsAvailable} tools used (${pct}% coverage) across ${c.loadedSessions} session${c.loadedSessions === 1 ? '' : 's'}`,
+    )
+    removeCommands.push(`claude mcp remove '${c.server}'`)
+  }
+
+  // Single combined cost pass: caps each call's contribution at the
+  // total unused-schema budget across all flagged servers, so two
+  // flagged servers cannot independently claim the same call's cache
+  // bucket and overstate `tokensSaved`.
+  const cost = estimateMcpSchemaCost(unusedCountsByServer, projects, flaggedServers)
+  const tokensSaved = Math.round(cost.effectiveInputTokens)
+  const impact: Impact = tokensSaved >= MCP_COVERAGE_HIGH_IMPACT_TOKENS
+    ? 'high'
+    : flagged.length >= UNUSED_MCP_HIGH_THRESHOLD
+      ? 'high'
+      : 'medium'
+
+  return {
+    title: `${flagged.length} MCP server${flagged.length === 1 ? '' : 's'} with low tool coverage`,
+    explanation:
+      `Schema for unused tools is loaded into the system prompt every session and ` +
+      `carried in the cached prefix on every turn. ` +
+      `${lines.join('; ')}.`,
+    impact,
+    tokensSaved,
+    fix: {
+      type: 'command',
+      label: flagged.length === 1
+        ? 'Remove the underused server, or trim its tools in your MCP config:'
+        : 'Remove underused servers, or trim their tools in your MCP config:',
+      text: removeCommands.join('\n'),
+    },
+  }
+}
+
 export function detectUnusedMcp(
   calls: ToolCall[],
   projects: ProjectSummary[],
   projectCwds: Set<string>,
+  mcpCoverage = aggregateMcpCoverage(projects),
 ): WasteFinding | null {
   const configured = loadMcpConfigs(projectCwds)
   if (configured.size === 0) return null
@@ -497,10 +829,27 @@ export function detectUnusedMcp(
     }
   }
 
+  // Servers that the new coverage detector will flag fall under its
+  // jurisdiction (per-tool granularity, cache-aware costing) and we
+  // suppress them here to avoid double-flagging. Importantly, we suppress
+  // only the servers that actually clear the coverage detector's
+  // thresholds — a small, inventoried-but-uninvoked server that the
+  // coverage detector skips would otherwise become a blind spot.
+  const coverageReportedServers = new Set(
+    mcpCoverage
+      .filter(c =>
+        c.toolsAvailable > MCP_COVERAGE_MIN_TOOLS
+        && c.loadedSessions >= MCP_COVERAGE_MIN_SESSIONS
+        && c.coverageRatio < MCP_COVERAGE_LOW_THRESHOLD,
+      )
+      .map(c => c.server),
+  )
+
   const now = Date.now()
   const unused: string[] = []
   for (const entry of configured.values()) {
     if (calledServers.has(entry.normalized)) continue
+    if (coverageReportedServers.has(entry.normalized)) continue
     if (entry.mtime > 0 && now - entry.mtime < MCP_NEW_CONFIG_GRACE_MS) continue
     unused.push(entry.original)
   }
@@ -965,6 +1314,7 @@ export async function scanAndDetect(
 
   const costRate = computeInputCostRate(projects)
   const { toolCalls, projectCwds, apiCalls, userMessages } = await scanSessions(dateRange)
+  const mcpCoverage = aggregateMcpCoverage(projects)
 
   const findings: WasteFinding[] = []
   const syncDetectors: Array<() => WasteFinding | null> = [
@@ -972,7 +1322,8 @@ export async function scanAndDetect(
     () => detectLowReadEditRatio(toolCalls),
     () => detectJunkReads(toolCalls, dateRange),
     () => detectDuplicateReads(toolCalls, dateRange),
-    () => detectUnusedMcp(toolCalls, projects, projectCwds),
+    () => detectUnusedMcp(toolCalls, projects, projectCwds, mcpCoverage),
+    () => detectMcpToolCoverage(projects, mcpCoverage),
     () => detectBloatedClaudeMd(projectCwds),
     () => detectBashBloat(),
   ]
