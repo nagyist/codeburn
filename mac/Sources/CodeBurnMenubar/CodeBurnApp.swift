@@ -15,9 +15,12 @@ struct CodeBurnApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
     var body: some Scene {
-        // SwiftUI App needs at least one scene. Settings is invisible by default.
+        // The Settings scene gives us a real macOS Settings window with the
+        // standard ⌘, shortcut and the menubar "Settings…" item. Provider tabs
+        // (Claude today, Codex/Cursor/etc. in follow-ups) live inside SettingsView.
         Settings {
-            EmptyView()
+            SettingsView()
+                .environment(delegate.store)
         }
     }
 }
@@ -26,7 +29,7 @@ struct CodeBurnApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
-    private let store = AppStore()
+    fileprivate let store = AppStore()
     let updateChecker = UpdateChecker()
     /// Held for the lifetime of the app to opt out of App Nap and Automatic Termination.
     private var backgroundActivity: NSObjectProtocol?
@@ -38,6 +41,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         // (26.x), setting it after didFinishLaunching causes ghost status items
         // because the policy gets baked into the initial focus chain.
         NSApp.setActivationPolicy(.accessory)
+    }
+
+    private func observeSubscriptionDisconnect() {
+        NotificationCenter.default.addObserver(
+            forName: .codeBurnSubscriptionDisconnected,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.resetSubscriptionCadenceAnchor()
+            }
+        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -57,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         setupDistributedNotificationListener()
         installLaunchAgentIfNeeded()
         registerLoginItemIfNeeded()
+        observeSubscriptionDisconnect()
         Task { await updateChecker.checkIfNeeded() }
     }
 
@@ -233,9 +249,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
+    fileprivate var lastSubscriptionRefreshAt: Date?
+
     private func startRefreshLoop() {
         refreshLoopTask?.cancel()
         refreshLoopTask = Task { [weak self] in
+            // Provider refreshes only run when the user has explicitly connected.
+            // Each refresh is a no-op until its corresponding bootstrap flag is set.
+            if let self {
+                async let claude = self.store.refreshSubscriptionReportingSuccess()
+                async let codex  = self.store.refreshCodexReportingSuccess()
+                if await claude { self.lastSubscriptionRefreshAt = Date() }
+                if await codex   { self.lastCodexRefreshAt = Date() }
+            }
             while !Task.isCancelled {
                 guard let self else { return }
                 // Skip the loop's tick if a wake / manual / distributed-
@@ -251,9 +277,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                     self.lastRefreshTime = Date()
                     self.refreshStatusButton()
                 }
+                // Cadence-driven live-quota refresh, anchored on LAST SUCCESS
+                // (not last attempt) so an intermittent failure doesn't reset
+                // the timer. Each provider has its own anchor so a Codex 429
+                // doesn't delay a due Claude refresh.
+                let cadence = SubscriptionRefreshCadence.current
+                if cadence != .manual {
+                    let claudeElapsed = Date().timeIntervalSince(self.lastSubscriptionRefreshAt ?? .distantPast)
+                    if claudeElapsed >= TimeInterval(cadence.rawValue) {
+                        let succeeded = await self.store.refreshSubscriptionReportingSuccess()
+                        if succeeded { self.lastSubscriptionRefreshAt = Date() }
+                    }
+                    let codexElapsed = Date().timeIntervalSince(self.lastCodexRefreshAt ?? .distantPast)
+                    if codexElapsed >= TimeInterval(cadence.rawValue) {
+                        let succeeded = await self.store.refreshCodexReportingSuccess()
+                        if succeeded { self.lastCodexRefreshAt = Date() }
+                    }
+                }
                 try? await Task.sleep(nanoseconds: refreshIntervalNanos)
             }
         }
+    }
+
+    fileprivate var lastCodexRefreshAt: Date?
+
+    @MainActor
+    func refreshSubscriptionNow() {
+        Task { [weak self] in
+            guard let self else { return }
+            // "Refresh Now" should refresh the menubar payload AND every
+            // connected provider's live quota — the user's intent is "make
+            // this match reality right now."
+            async let payload: Void = self.store.refresh(includeOptimize: false, force: true, showLoading: true)
+            async let claude: Bool = self.store.refreshSubscriptionReportingSuccess()
+            async let codex:  Bool = self.store.refreshCodexReportingSuccess()
+            _ = await payload
+            if await claude { self.lastSubscriptionRefreshAt = Date() }
+            if await codex  { self.lastCodexRefreshAt = Date() }
+        }
+    }
+
+    /// Reset the cadence anchor so the next loop tick re-evaluates from "now"
+    /// rather than measuring against a timestamp from the previous connection.
+    /// Triggered on disconnect of any provider — the cost of clearing both
+    /// anchors is one extra refresh tick on the unaffected provider, far less
+    /// disruptive than waiting a full cadence after a reconnect.
+    @MainActor
+    func resetSubscriptionCadenceAnchor() {
+        lastSubscriptionRefreshAt = nil
+        lastCodexRefreshAt = nil
     }
 
     private func observeStore() {
@@ -270,6 +342,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             // Track currency so the menubar title catches up immediately on
             // currency switch instead of waiting for the next 30s payload tick.
             _ = self.store.currency
+            // Track the live-quota state too so the flame icon re-tints on
+            // every subscription / codex usage update, not just every 30s.
+            _ = self.store.subscription
+            _ = self.store.subscriptionLoadState
+            _ = self.store.codexUsage
+            _ = self.store.codexLoadState
         } onChange: { [weak self] in
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -319,6 +397,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// stubborn gap between icon and text on some macOS releases (the icon hugs the left edge
     /// of the status item, the title starts at its own baseline), so we inline both so they
     /// flow as one typographic unit with a single, controllable gap.
+    private static func flameTint(for severity: QuotaSummary.Severity) -> NSColor? {
+        switch severity {
+        case .normal:   return nil                              // template, auto-adapt
+        case .warning:  return NSColor.systemYellow            // 70-90%
+        case .critical: return NSColor.systemOrange            // 90-100%
+        case .danger:   return NSColor.systemRed               // 100%+
+        }
+    }
+
     private func refreshStatusButton() {
         guard let button = statusItem.button else { return }
         // Skip while the popover is anchored to this button. Rewriting the
@@ -334,10 +421,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         button.imagePosition = .noImage
 
         let font = NSFont.monospacedDigitSystemFont(ofSize: menubarTitleFontSize, weight: .medium)
-        let flameConfig = NSImage.SymbolConfiguration(pointSize: menubarTitleFontSize, weight: .medium)
+        let baseConfig = NSImage.SymbolConfiguration(pointSize: menubarTitleFontSize, weight: .medium)
+        // Tint the flame based on the worst-affected connected provider's quota.
+        // Normal (<70%) keeps the template (auto white-on-dark / black-on-light);
+        // warning/critical/danger override with a fixed palette color so the
+        // user gets a glanceable signal even when the menu bar is busy.
+        let aggregate = store.aggregateQuotaStatus
+        let tint = Self.flameTint(for: aggregate.severity)
+        let flameConfig: NSImage.SymbolConfiguration
+        if let tint {
+            flameConfig = baseConfig.applying(.init(paletteColors: [tint]))
+        } else {
+            flameConfig = baseConfig
+        }
         let flame = NSImage(systemSymbolName: "flame.fill", accessibilityDescription: "CodeBurn")?
             .withSymbolConfiguration(flameConfig)
-        flame?.isTemplate = true
+        flame?.isTemplate = (tint == nil)
 
         let attachment = NSTextAttachment()
         attachment.image = flame
@@ -393,14 +492,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         if popover.isShown {
             popover.performClose(sender)
         } else {
-            NSApp.activate(ignoringOtherApps: true)
+            // Do NOT call NSApp.activate(ignoringOtherApps:) here. On macOS
+            // Tahoe an accessory app activating while a popover anchors to
+            // its NSStatusItem can race with the system menu bar's auto-hide
+            // logic and leave the user's apple-menu hidden until the popover
+            // closes. The popover's window takes keyboard focus on its own
+            // via makeKeyAndOrderFront, which is enough for keystrokes to
+            // reach the SwiftUI content.
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            popover.contentViewController?.view.window?.makeKey()
+            if let window = popover.contentViewController?.view.window {
+                // Pin the popover's window above the status-bar layer but tag
+                // it as auxiliary so macOS Tahoe does not treat it as an
+                // app-level focus event — that's what was hiding the system
+                // menu bar (Terminal's apple-logo / Shell / Edit / View row)
+                // every time the popover opened.
+                window.level = .statusBar
+                window.collectionBehavior.insert(.fullScreenAuxiliary)
+                window.collectionBehavior.insert(.canJoinAllSpaces)
+                window.makeKeyAndOrderFront(nil)
+            }
         }
     }
 
     private func showContextMenu(from button: NSStatusBarButton) {
         let menu = NSMenu()
+
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
+        let refreshNow = NSMenuItem(title: "Refresh Now", action: #selector(refreshNowAction), keyEquivalent: "r")
+        refreshNow.target = self
+        menu.addItem(refreshNow)
+
+        menu.addItem(.separator())
         let updateItem = NSMenuItem(title: "Check for Updates", action: #selector(checkForUpdates), keyEquivalent: "")
         updateItem.target = self
         menu.addItem(updateItem)
@@ -408,9 +533,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let quitItem = NSMenuItem(title: "Quit CodeBurn", action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
+
         statusItem.menu = menu
         button.performClick(nil)
         statusItem.menu = nil
+    }
+
+    private var settingsWindowController: NSWindowController?
+
+    @objc private func openSettings() {
+        // Accessory-policy apps (no Dock icon, no main menu) don't get the
+        // SwiftUI Settings scene wired into the responder chain reliably, so
+        // the standard `showSettingsWindow:` selector silently no-ops. We host
+        // the SwiftUI view in our own NSWindowController instead.
+        if let controller = settingsWindowController {
+            NSApp.activate(ignoringOtherApps: true)
+            controller.window?.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        let hosting = NSHostingController(
+            rootView: SettingsView().environment(store)
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 380),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "CodeBurn Settings"
+        window.contentViewController = hosting
+        window.center()
+        window.isReleasedWhenClosed = false
+        let controller = NSWindowController(window: window)
+        settingsWindowController = controller
+        NSApp.activate(ignoringOtherApps: true)
+        controller.showWindow(nil)
+    }
+
+    @objc private func refreshNowAction() {
+        refreshSubscriptionNow()
     }
 
     private func codeburnAlertIcon() -> NSImage? {
